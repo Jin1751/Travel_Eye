@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Travel Eye</string>
+    <string name="title_activity_success_landmark">SuccessLandmark</string>
 </resources>
