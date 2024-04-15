@@ -10,6 +10,7 @@ import android.location.Geocoder
 import android.location.Geocoder.GeocodeListener
 import android.location.LocationListener
 import android.location.LocationManager
+import android.location.Location
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -44,7 +45,6 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -54,8 +54,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat.startActivity
 import androidx.core.content.FileProvider
+import com.example.traveleye.NearLandmark
+import com.example.traveleye.SuccessLandmark
 import com.example.traveleye.ui.theme.TravelEyeTheme
 import com.google.android.gms.tasks.Task
 import com.google.gson.Gson
@@ -78,8 +79,7 @@ import java.io.ByteArrayOutputStream
 class MainActivity : ComponentActivity() {
     private lateinit var locationManager : LocationManager
     private lateinit var locationListener : LocationListener
-    private var lat : Double = 0.0
-    private var lon : Double = 0.0
+    private lateinit var userLocation : Location
     private var country = mutableStateOf("나라")
     private var city = mutableStateOf("도시")
     private var searchTxt = mutableStateOf("장소 검색")
@@ -113,13 +113,10 @@ class MainActivity : ComponentActivity() {
         this.auth.signInAnonymously()//firebase에 익명 사용자로 로그인
 
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
-        locationListener = LocationListener {
-            lat = it.latitude
-            lon = it.longitude
+        locationListener = LocationListener { location ->
+            userLocation = location
             getAddress()
-            }
-
-
+        }
         setContent {
             TravelEyeTheme {
                 // A surface container using the 'background' color from the theme
@@ -144,6 +141,7 @@ class MainActivity : ComponentActivity() {
         Log.d("onStart", "onStart")
         checkPermissions()
         startLocationUpdate()
+
     }
 
     override fun onResume() {
@@ -152,32 +150,27 @@ class MainActivity : ComponentActivity() {
         if (isSearchImg.value){//이전 액티비티가 카메라 촬영 액티비티였다면 CLoud Vision API 검색 작업 실행
             showProgress.value = true
             searchTxt.value = "   검색중"
-            var inputStream = contentResolver.openInputStream(imgUri.value)
+            val inputStream = contentResolver.openInputStream(imgUri.value)
             bitmapImg.value = BitmapFactory.decodeStream(inputStream)//Cloud Vision API에 보낼 이미지를 Uri에서 비트맵으로 변환
             inputStream?.close()
-            Log.d("onResume", "CHANGE URI -> BITMAP")
             bitmapImg.value = scaleBitmap(bitmapImg.value)//Cloud Vision API에 보낼 이미지를 규격에 맞게 조절
-            Log.d("onResume", "CHANGE SIZE")
             functions = Firebase.functions
 
             val byteArrayOutputStream = ByteArrayOutputStream()
             bitmapImg.value.compress(Bitmap.CompressFormat.JPEG, 100, byteArrayOutputStream)//이미지를 압축
             val imageBytes: ByteArray = byteArrayOutputStream.toByteArray()
             val base64encoded = Base64.encodeToString(imageBytes, Base64.NO_WRAP)//이미지를 64비트 문자열로 변환
-            Log.d("onResume", "Json 1")
             val request = JsonObject()//Cloud Vision API에 request 보낼 메세지를 담을 Json 오브젝트
-            Log.d("onResume", "Json 2")
             val img = JsonObject()//Cloud Vision API에 request 보낼 이미지를 담을 Json 오브젝트
             img.add("content", JsonPrimitive(base64encoded))//이미지 변환 64비트 문자열을 오브젝트에 입력
             request.add("image",img)//이미지 오브젝트를 request 오브젝트에 입력
-            Log.d("onResume", "Json 3")
             val feature = JsonObject()//Cloud Vision API에 request 보낼 나머지 세부사항을 담을 Json 오브젝트 1
             feature.add("maxResults", JsonPrimitive(5))//최대 검색 결과를 5개로 설정
             feature.add("type", JsonPrimitive("LANDMARK_DETECTION"))//Cloud Vision API의 검색 형식을 명소 검색으로 설정
             val features = JsonArray()//Cloud Vision API에 request 보낼 나머지 세부사항을 담을 Json 오브젝트 2
             features.add(feature)// 세부사항을 적은 오브젝트1 를 오브젝트2에 입력
             request.add("features",features)//세부사항 오브젝트를 request 오브젝트에 입력
-            Log.d("onResume", "Json 4")
+            val intent = Intent(this, SuccessLandmark::class.java)
             annotateImage(request.toString()).addOnCompleteListener{task ->
                 if (task.isSuccessful){//Firebase 통신으로 Cloud Vision API와 통신완료 시
                     val e = task.exception
@@ -192,31 +185,45 @@ class MainActivity : ComponentActivity() {
                         Log.d("0 Result", "검색에 실패했습니다.")
                     }
                     else{//검색 결과가 있을 경우
+                        var totalLandmark = 0
                         for (label in task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray) {// 검색 결과를 순서대로 출력
                             val labelObj = label.asJsonObject
-                            val landmarkName = labelObj["description"]//명소이름
-                            val entityId = labelObj["mid"]//명소 id
-                            val score = labelObj["score"]//해당 명소일 확률(?)
-                            val bounds = labelObj["boundingPoly"]//Cloud Vision API가 이미지의 특징을 인식한 박스나 폴리곤의 정보
+                            val landmarkName = labelObj["description"].asString//명소이름
+                            val score = labelObj["score"].asDouble//해당 명소일 확률(?)
+
+
                             Log.d("VISION DESC", "Description: " + landmarkName)
-                            Log.d("VISION ID", "mid: " + entityId)
                             Log.d("VISION Score", "score: " + score)
-                            Log.d("VISION BoundingPoly", "boundingPoly" + bounds)
+
                             // Multiple locations are possible, e.g., the location of the depicted
                             // landmark and the location the picture was taken.
+
                             for (loc in labelObj["locations"].asJsonArray) {
                                 val latitude = loc.asJsonObject["latLng"].asJsonObject["latitude"]
                                 val longitude = loc.asJsonObject["latLng"].asJsonObject["longitude"]
-                                Log.d("VISION", "Lat: " + latitude + ", Lon: " + longitude)
+                                val place = Location(LocationManager.GPS_PROVIDER)
+                                place.latitude = latitude.asDouble
+                                place.longitude = longitude.asDouble
+                                if (userLocation.distanceTo(place) < 5000){
+                                    totalLandmark += 1
+                                    Log.d("VISION $totalLandmark", "Distance: " + userLocation.distanceTo(place))
+                                    val landmark = NearLandmark(landmarkName, score)
+                                    intent.putExtra("landMark$totalLandmark", landmark)
+                                }
+                                Log.d("VISION", "Distance: " + userLocation.distanceTo(place))
                             }
+
                         }
+                        isSearchImg.value = false
+                        intent.putExtra("totalLandmark",totalLandmark)
+                        startActivity(intent)
                     }
 
                 }
                 else{Log.d("VISION", "FAIL")}
                 }//Firebase를 통해 Cloud Vision API에 request 후 결과에 따른 리스너
             isSearchImg.value = false
-
+            Log.d("VISION isSearchImg", isSearchImg.value.toString())
         }
 
     }
@@ -277,7 +284,7 @@ class MainActivity : ComponentActivity() {
         ) {
             return
         }
-        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 300000,0f, locationListener, Looper.getMainLooper())
+        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 60000,10f, locationListener, Looper.getMainLooper())
 
     }//사용자의 위치좌표를 가져올 함수, 5분에 한번씩 가져온다
     private fun stopLocationUpdate(){
@@ -290,10 +297,10 @@ class MainActivity : ComponentActivity() {
                 addresses -> country.value = addresses[0].countryName
                 city.value = addresses[0].adminArea
             }
-            geocoder.getFromLocation(lat,lon,1,geoListener)
+            geocoder.getFromLocation(userLocation.latitude,userLocation.longitude,1,geoListener)
         }
         else{
-            var addr = geocoder.getFromLocation(lat,lon,1)
+            val addr = geocoder.getFromLocation(userLocation.latitude,userLocation.longitude,1)
             if (addr != null) {
                 if (addr.isNotEmpty()){
                     val address = addr[0]
@@ -350,7 +357,7 @@ fun MainActivity(cityState: MutableState<String>, countryState: MutableState<Str
         Spacer(modifier = modifier.height(20.dp))
         UserLocaleTxt(cityState = cityState, countryState = countryState)
         Spacer(modifier = modifier.height(screenH/4))
-        CameraBtn(screenH, screenW, searchTxt,imgUri, isSearch)
+        CameraBtn(screenW, searchTxt,imgUri, isSearch)
     }
 
 }
@@ -368,11 +375,11 @@ fun UserLocaleTxt(cityState: MutableState<String>, countryState: MutableState<St
 
 @Composable
 
-fun CameraBtn(screenH : Dp, screenW : Dp, searchTxt: MutableState<String>,imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>,modifier: Modifier = Modifier){
+fun CameraBtn(screenW : Dp, searchTxt: MutableState<String>,imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>,modifier: Modifier = Modifier){
     val btnColor = ButtonDefaults.buttonColors(Color(0,179,219,255))
     val btnElevation = ButtonDefaults.buttonElevation(defaultElevation = 7.dp)
-    var uri = LocalContext.current.createTmpImageUri()
     val context = LocalContext.current
+    val uri = context.createTmpImageUri()
     val camLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.TakePicture(), onResult = {
         Log.d("CAMERA LAUNCHER", it.toString())
         if (it){
@@ -415,7 +422,7 @@ fun Context.createTmpImageUri(
 
 @Composable
 fun circularProgressBar(showProgress : MutableState<Boolean>, modifier: Modifier = Modifier) {
-    var loading by remember { showProgress }
+    val loading by remember { showProgress }
 
     if (!loading) return
 
@@ -435,13 +442,3 @@ fun circularProgressBar(showProgress : MutableState<Boolean>, modifier: Modifier
     }
 
 }// API로부터 결과값을 받아올 때까지 처리중을 표시할 원형 프로그래스 바
-
-var country = mutableStateOf("나라")
-var city = mutableStateOf("도시")
-//@Preview(showBackground = true)
-//@Composable
-//fun GreetingPreview() {
-//    TravelEyeTheme {
-//        MainActivity(city,country)
-//    }
-//}
