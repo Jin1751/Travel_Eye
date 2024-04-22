@@ -1,4 +1,4 @@
-package com.example.traveleye.ui.theme
+package com.dongjin.traveleye.ui.theme
 
 import android.app.Activity
 import android.os.Build

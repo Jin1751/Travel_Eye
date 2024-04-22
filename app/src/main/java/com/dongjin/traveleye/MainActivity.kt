@@ -55,9 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.FileProvider
-import com.example.traveleye.NearLandmark
-import com.example.traveleye.SuccessLandmark
-import com.example.traveleye.ui.theme.TravelEyeTheme
+import com.dongjin.traveleye.ui.theme.TravelEyeTheme
 import com.google.android.gms.tasks.Task
 import com.google.gson.Gson
 import com.google.gson.JsonElement
@@ -171,6 +169,9 @@ class MainActivity : ComponentActivity() {
             features.add(feature)// 세부사항을 적은 오브젝트1 를 오브젝트2에 입력
             request.add("features",features)//세부사항 오브젝트를 request 오브젝트에 입력
             val intent = Intent(this, SuccessLandmark::class.java)
+            intent.putExtra("userLocation", userLocation)
+            Log.d("Intent USERLOC", userLocation.latitude.toString() + ", " + userLocation.longitude)
+
             annotateImage(request.toString()).addOnCompleteListener{task ->
                 if (task.isSuccessful){//Firebase 통신으로 Cloud Vision API와 통신완료 시
                     val e = task.exception
@@ -206,8 +207,9 @@ class MainActivity : ComponentActivity() {
                                 place.longitude = longitude.asDouble
                                 if (userLocation.distanceTo(place) < 5000){
                                     totalLandmark += 1
+
                                     Log.d("VISION $totalLandmark", "Distance: " + userLocation.distanceTo(place))
-                                    val landmark = NearLandmark(landmarkName, score)
+                                    val landmark = NearLandmark(landmarkName, score, place)
                                     intent.putExtra("landMark$totalLandmark", landmark)
                                 }
                                 Log.d("VISION", "Distance: " + userLocation.distanceTo(place))

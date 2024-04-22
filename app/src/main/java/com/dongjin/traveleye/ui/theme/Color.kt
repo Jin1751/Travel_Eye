@@ -1,4 +1,4 @@
-package com.example.traveleye.ui.theme
+package com.dongjin.traveleye.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
