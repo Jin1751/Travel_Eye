@@ -1,4 +1,4 @@
-package com.example.traveleye
+package com.dongjin.traveleye
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
