@@ -73,6 +73,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
 import java.io.ByteArrayOutputStream
+import kotlin.system.exitProcess
 
 class MainActivity : ComponentActivity() {
     private lateinit var locationManager : LocationManager
@@ -83,7 +84,7 @@ class MainActivity : ComponentActivity() {
     private var searchTxt = mutableStateOf("장소 검색")
     private var imgUri = mutableStateOf(Uri.EMPTY)
     private val initBitmap = Bitmap.createBitmap(1000, 1000, Bitmap.Config.ARGB_8888)
-    private var bitmapImg = mutableStateOf<Bitmap>(initBitmap)
+    private var bitmapImg = mutableStateOf(initBitmap)
     private lateinit var functions: FirebaseFunctions
     private lateinit var auth: FirebaseAuth
     private var isSearchImg = mutableStateOf(false)
@@ -104,7 +105,7 @@ class MainActivity : ComponentActivity() {
                 } else {// 로그인 실패시
                     // If sign in fails, display a message to the user.
                     Log.w("Firebase Auth", "signInAnonymously:failure", task.exception)
-                    Toast.makeText(baseContext,"Authentication failed.",Toast.LENGTH_SHORT,).show()
+                    Toast.makeText(baseContext,"Authentication failed.",Toast.LENGTH_SHORT).show()
                     updateUI(null)
                 }
             }
@@ -193,8 +194,8 @@ class MainActivity : ComponentActivity() {
                             val score = labelObj["score"].asDouble//해당 명소일 확률(?)
 
 
-                            Log.d("VISION DESC", "Description: " + landmarkName)
-                            Log.d("VISION Score", "score: " + score)
+                            Log.d("VISION DESC", "Description: $landmarkName")
+                            Log.d("VISION Score", "score: $score")
 
                             // Multiple locations are possible, e.g., the location of the depicted
                             // landmark and the location the picture was taken.
@@ -257,13 +258,13 @@ class MainActivity : ComponentActivity() {
                             shouldShowRequestPermissionRationale(permission)
                             Toast.makeText(this, "위치 권한을 허용해주세요", Toast.LENGTH_SHORT).show()
                             ActivityCompat.finishAffinity(this)
-                            System.exit(0)
+                            exitProcess(0)
                         }
                         if (permission == Manifest.permission.CAMERA) {
                             shouldShowRequestPermissionRationale(permission)
                             Toast.makeText(this, "카메라 권한을 허용해주세요", Toast.LENGTH_SHORT).show()
                             ActivityCompat.finishAffinity(this)
-                            System.exit(0)
+                            exitProcess(0)
                         }
                     }
                     else -> {

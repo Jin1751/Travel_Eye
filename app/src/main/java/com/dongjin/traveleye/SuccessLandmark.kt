@@ -1,6 +1,5 @@
 package com.dongjin.traveleye
 
-import android.content.Context
 import android.content.Intent
 import android.location.Location
 import android.os.Build
@@ -62,8 +61,6 @@ data class NearLandmark(val name: String, val score: Double, val locate : Locati
 class SuccessLandmark : ComponentActivity() {
     private lateinit var locationIntent : Intent
     private lateinit var userLocation :Location
-    private var placeName = mutableStateOf("PlaceName")
-    private var showInfo = mutableStateOf(false)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         locationIntent = intent
@@ -97,7 +94,7 @@ class SuccessLandmark : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        LandMarkInfoMap(landmarkArray = landmarkArray,userLocation= userLocation, context = this)
+                        LandMarkInfoMap(landmarkArray = landmarkArray,userLocation= userLocation)
                     }
                 }
 
@@ -107,13 +104,13 @@ class SuccessLandmark : ComponentActivity() {
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
-fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Location, context: Context, modifier: Modifier = Modifier){
+fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Location, modifier: Modifier = Modifier){
     val context = LocalContext.current
     val deviceInfo = LocalConfiguration.current //현재 디바이스의 정보
     val mapCamera = CameraPosition.fromLatLngZoom(LatLng(userLocation.latitude,userLocation.longitude),15.0f)//구글 지도 카메라
-    var scope = rememberCoroutineScope()//하단의 정보창을 끄고 킬 때 사용할 코루딘 스코프
-    var bottomSheetState = rememberModalBottomSheetState(initialValue = ModalBottomSheetValue.Hidden)//하단 정보창의 상태를 컨트롤 할 상태 변수
-    var placeName = mutableStateOf("Please Select LandMark")//랜드마크 이름을 표시할 텍스트 뷰에 들어갈 이름 변수
+    val scope = rememberCoroutineScope()//하단의 정보창을 끄고 킬 때 사용할 코루딘 스코프
+    val bottomSheetState = rememberModalBottomSheetState(initialValue = ModalBottomSheetValue.Hidden)//하단 정보창의 상태를 컨트롤 할 상태 변수
+    val placeName = mutableStateOf("Please Select LandMark")//랜드마크 이름을 표시할 텍스트 뷰에 들어갈 이름 변수
     ModalBottomSheetLayout(//지도 하단에 표시될 랜드마크 정보창 & 구글 맵
         sheetState = bottomSheetState, sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
         sheetContent = @Composable {
@@ -148,7 +145,7 @@ fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Loc
                     AdvancedMarker(
                         state = MarkerState(ll),
                         pinConfig = pinConfig,
-                        onClick = { it ->//마커가 눌렸을때 하단의 랜드마크 정보창 Open
+                        onClick = {//마커가 눌렸을때 하단의 랜드마크 정보창 Open
                             placeName.value = nl.name
                             scope.launch { bottomSheetState.show() }
                             false
@@ -172,10 +169,10 @@ fun GreetingPreview() {
     loc.longitude = -9.4411821
     val lm = NearLandmark("TEST LOC", 0.5, loc)
     val arr : MutableList<NearLandmark> = mutableListOf(lm)
-    var user = Location("TEST")
+    val user = Location("TEST")
     user.latitude = 52.9715
     user.longitude = -9.4411821
     TravelEyeTheme {
-        LandMarkInfoMap(arr,user, LocalContext.current)
+        LandMarkInfoMap(arr,user)
     }
 }
