@@ -1,0 +1,142 @@
+package com.dongjin.traveleye
+
+import android.content.Intent
+import android.os.Bundle
+import android.util.Log
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.dongjin.traveleye.ui.theme.TravelEyeTheme
+import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.BlockThreshold
+import com.google.ai.client.generativeai.type.GenerateContentResponse
+import com.google.ai.client.generativeai.type.HarmCategory
+import com.google.ai.client.generativeai.type.SafetySetting
+//import com.google.ai.client.generativeai.type.generationConfig
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+
+class ExplainLandMark : ComponentActivity() {
+    private lateinit var landmarkIntent : Intent
+    private var landmarkName = ""
+    private var description = mutableStateOf("")
+    private var showProgress = mutableStateOf(true)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        landmarkIntent = intent
+        landmarkName = landmarkIntent.getStringExtra("LandmarkName")!!
+
+        val aiScope = CoroutineScope(Dispatchers.Main)
+        lateinit var response : GenerateContentResponse
+        aiScope.launch {
+            val task = async (Dispatchers.Main) {
+                response =  askGemini(landmarkName)
+            }
+            task.await()
+            description.value = response.text!!
+            if (task.isCompleted) { showProgress.value = false}
+            Log.d("GEMINI RESPONSE", response.toString())
+        }
+
+        setContent {
+            TravelEyeTheme {
+                // A surface container using the 'background' color from the theme
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    LandmarkDescription(landmarkName, description)
+                    circularProgress(showProgress = showProgress)
+                }
+            }
+        }
+    }
+
+    private suspend fun askGemini(landmarkName: String): GenerateContentResponse {
+        val harassmentSafety = SafetySetting(HarmCategory.HARASSMENT, BlockThreshold.ONLY_HIGH)
+        val hateSpeechSafety =
+            SafetySetting(HarmCategory.HATE_SPEECH, BlockThreshold.MEDIUM_AND_ABOVE)
+        //val config = generationConfig { }
+        val model = GenerativeModel(
+            modelName = "gemini-pro",
+            apiKey = BuildConfig.GEMINI_API_KEY,
+            safetySettings = listOf(harassmentSafety, hateSpeechSafety)
+        )
+        val prompt = "Explain about $landmarkName in Korean"
+        return model.generateContent(prompt)
+    }
+}
+
+@Composable
+fun LandmarkDescription(landmarkName: String, description: MutableState<String>, modifier: Modifier = Modifier) {
+    Column {
+        Text(
+            text = landmarkName,
+            modifier = modifier,
+            fontSize = 30.sp
+        )
+        Spacer(modifier = modifier.height(30.dp))
+
+        Text(
+            text = description.value,
+            modifier = modifier.verticalScroll(rememberScrollState())
+        )
+    }
+
+}
+
+@Composable
+private fun circularProgress(showProgress : MutableState<Boolean>, modifier: Modifier = Modifier) {
+    val loading by remember { showProgress }
+
+    if (!loading) return
+
+    val config = LocalConfiguration.current
+    val screenH = config.screenHeightDp.dp
+    val screenW = config.screenWidthDp.dp
+    Column (modifier = modifier.fillMaxSize()) {
+        Spacer(modifier = modifier.height((screenH / 2) - 75.dp))
+        Row (modifier = modifier.fillMaxSize()) {
+            Spacer(modifier = modifier.width((screenW / 2) - 33.5.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.width(61.5.dp),
+                color = Color.Cyan,
+                strokeWidth = 10.7.dp,
+            )
+        }
+    }
+
+}// API로부터 결과값을 받아올 때까지 처리중을 표시할 원형 프로그래스 바
+
+@Preview(showBackground = true)
+@Composable
+fun GreetingPreview2() {
+    val ts = mutableStateOf("Hello")
+    TravelEyeTheme {
+        LandmarkDescription("Android",ts)
+    }
+}

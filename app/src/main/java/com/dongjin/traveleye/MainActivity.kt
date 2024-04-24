@@ -423,7 +423,7 @@ fun Context.createTmpImageUri(
 } // 찍은 이미지를 Uri로 사용하기 위한 함수
 
 @Composable
-fun circularProgressBar(showProgress : MutableState<Boolean>, modifier: Modifier = Modifier) {
+private fun circularProgressBar(showProgress : MutableState<Boolean>, modifier: Modifier = Modifier) {
     val loading by remember { showProgress }
 
     if (!loading) return

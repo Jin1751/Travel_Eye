@@ -2,26 +2,26 @@ package com.dongjin.traveleye
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.BitmapFactory
 import android.location.Location
 import android.os.Build
 import android.os.Bundle
 import android.os.Parcelable
 import android.util.Log
-import android.view.View
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.Colors
 import android.graphics.Color as Colorg
 import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.Icon
 import androidx.compose.material.ModalBottomSheetLayout
-import androidx.compose.material.ModalBottomSheetState
 import androidx.compose.material.ModalBottomSheetValue
 import androidx.compose.material.rememberModalBottomSheetState
 import androidx.compose.material3.Button
@@ -29,32 +29,32 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat.startActivity
 import kotlinx.parcelize.Parcelize
 import com.dongjin.traveleye.ui.theme.TravelEyeTheme
-import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.GoogleMapOptions
-import com.google.android.gms.maps.MapFragment
-import com.google.android.gms.maps.model.AdvancedMarkerOptions
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.MapCapabilities
-import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.PinConfig
 import com.google.maps.android.compose.AdvancedMarker
 import com.google.maps.android.compose.CameraPositionState
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.GoogleMapComposable
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberMarkerState
+import kotlinx.coroutines.launch
 
 @Parcelize
 data class NearLandmark(val name: String, val score: Double, val locate : Location) : Parcelable
@@ -62,24 +62,26 @@ data class NearLandmark(val name: String, val score: Double, val locate : Locati
 class SuccessLandmark : ComponentActivity() {
     private lateinit var locationIntent : Intent
     private lateinit var userLocation :Location
+    private var placeName = mutableStateOf("PlaceName")
+    private var showInfo = mutableStateOf(false)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         locationIntent = intent
-        userLocation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        userLocation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {//빌드 버전 33 이상 시 인텐트에서 사용자 위치 가져오는 작업
             locationIntent.getParcelableExtra("userLocation",Location::class.java)!!
-        }else{
+        }else{//빌드 버전 33 미만시
             locationIntent.getParcelableExtra("userLocation")!!
         }
         Log.d("SUCCESS USERLOC", userLocation.latitude.toString() + ", " + userLocation.longitude)
-        val totalLandmark = locationIntent.getIntExtra("totalLandmark",0)
-        val landmarkArray : MutableList<NearLandmark> = mutableListOf()
-        for (i in 1..totalLandmark){
+        val totalLandmark = locationIntent.getIntExtra("totalLandmark",0)//인텐트에 있는 랜드마크의 갯수
+        val landmarkArray : MutableList<NearLandmark> = mutableListOf()//랜드마크들을 저장할 리스트
+        for (i in 1..totalLandmark){//인텐트에 있는 랜드마크를 모두 리스트에 저장
            val lm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                locationIntent.getParcelableExtra("landMark$i",NearLandmark::class.java)
             } else{
                locationIntent.getParcelableExtra("landMark$i")
             }
-            if (lm != null) {
+            if (lm != null) {//랜드마크가 null이 아닐 경우만 리스트에 저장
                 landmarkArray.add(lm)
                 Log.d("LandMark$i", lm.name + ", " + lm.score)
             }
@@ -95,7 +97,7 @@ class SuccessLandmark : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        MapView(landmarkArray, userLocation)
+                        LandMarkInfoMap(landmarkArray = landmarkArray,userLocation= userLocation, context = this)
                     }
                 }
 
@@ -103,76 +105,66 @@ class SuccessLandmark : ComponentActivity() {
        }
 }
 
-@Composable
-fun MapView(landmarkArray: MutableList<NearLandmark>, userLocation: Location, modifier: Modifier = Modifier) {
-    val contxt = LocalContext.current
-    val mapCamera = CameraPosition.fromLatLngZoom(LatLng(userLocation.latitude,userLocation.longitude),15.0f)
-    var placeInfoShow = false
-    var placeName = ""
-    Box(modifier = modifier.fillMaxSize()) {
-        GoogleMap(
-            modifier = modifier.fillMaxSize(),
-            cameraPositionState = CameraPositionState(mapCamera),
-            googleMapOptionsFactory = { GoogleMapOptions().mapId(BuildConfig.MAP_ID) }) {
-            val pinConfig = PinConfig.builder()
-                .setBackgroundColor(Colorg.RED)
-                .setBorderColor(Colorg.WHITE)
-                .build()
-            landmarkArray.forEach { nl ->
-                val ll = LatLng(nl.locate.latitude, nl.locate.longitude)
-                AdvancedMarker(
-                    state = MarkerState(ll),
-                    title = nl.name,
-                    snippet = "Marker ${nl.name}",
-                    pinConfig = pinConfig,
-                    onClick = { it ->
-                        Log.d("MARKER", "CLICK")
-                        placeName = nl.name
-                        placeInfoShow = true
-                        false
-                    })
-            }
-
-            val userLoc = LatLng(userLocation.latitude, userLocation.longitude)
-            val uGlyph = PinConfig.Glyph(BitmapDescriptorFactory.fromResource(R.drawable.ic_my_location))
-            val uPinConfig =PinConfig.builder()
-                            .setBackgroundColor(Colorg.BLUE)
-                            .setBorderColor(Colorg.WHITE)
-                            .setGlyph(uGlyph)
-                            .build()
-            Log.d("UPIN", ((uPinConfig).toString()))
-            AdvancedMarker(
-                state = MarkerState(userLoc),
-                title = "User",
-                snippet = "User Location",
-                pinConfig = uPinConfig
-            )
-
-            //placeInfo(placeName = placeName, showInfo = placeInfoShow, context = contxt)
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
-fun placeInfo(placeName : String, showInfo : Boolean, context: Context, modifier: Modifier = Modifier){
-    ModalBottomSheetLayout(
-        sheetState = rememberModalBottomSheetState(initialValue = if(showInfo) {ModalBottomSheetValue.Hidden} else {ModalBottomSheetValue.Expanded}
-        ), sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Location, context: Context, modifier: Modifier = Modifier){
+    val context = LocalContext.current
+    val deviceInfo = LocalConfiguration.current //현재 디바이스의 정보
+    val mapCamera = CameraPosition.fromLatLngZoom(LatLng(userLocation.latitude,userLocation.longitude),15.0f)//구글 지도 카메라
+    var scope = rememberCoroutineScope()//하단의 정보창을 끄고 킬 때 사용할 코루딘 스코프
+    var bottomSheetState = rememberModalBottomSheetState(initialValue = ModalBottomSheetValue.Hidden)//하단 정보창의 상태를 컨트롤 할 상태 변수
+    var placeName = mutableStateOf("Please Select LandMark")//랜드마크 이름을 표시할 텍스트 뷰에 들어갈 이름 변수
+    ModalBottomSheetLayout(//지도 하단에 표시될 랜드마크 정보창 & 구글 맵
+        sheetState = bottomSheetState, sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
         sheetContent = @Composable {
-        Column {
-            Text("${placeName}", color = Color.Black, fontSize = 25.sp)
-            Button(onClick = { Toast.makeText(context, "AI 검색 토스트", Toast.LENGTH_LONG).show()})
-            {
-                Text("AI 설명 보기")
+            Column {
+                Row(modifier = modifier.offset(x = (deviceInfo.screenWidthDp / 2 - 30).dp)){
+                    Icon(modifier = modifier.offset(y = (-10).dp),imageVector = ImageVector.vectorResource(R.drawable.handle), contentDescription = "")
+                }//하단 랜드마크 정보창의 핸들 배치
+                Text(modifier = modifier.offset(x=5.dp),text = placeName.value, color = Color.Black, fontSize = 25.sp)//선택된 랜드마크의 이름
+                Spacer(modifier = modifier.height(30.dp))
+                Button(modifier = modifier
+                    .width(deviceInfo.screenWidthDp.dp)
+                    .height((deviceInfo.screenHeightDp * 0.065).dp), shape = RoundedCornerShape(10.dp)
+                    ,onClick = {
+                        Toast.makeText(context, "AI 검색 토스트", Toast.LENGTH_LONG).show()
+                        val intent = Intent(context, ExplainLandMark::class.java)
+                        intent.putExtra("LandmarkName", placeName.value)
+                        startActivity(context,intent,null)})// AI 설명을 요청할 버튼
+                {
+                    Text("AI 설명 보기", fontSize = 20.sp)
+                }
+                Spacer(modifier = modifier.height(3.dp))
             }
-        }
-        }) {
+        },
+        content = {//랜드마크 설명 창 외에 표시 될 콘텐츠 [구글 지도]
+            GoogleMap(
+                modifier = modifier.fillMaxSize(),
+                cameraPositionState = CameraPositionState(mapCamera),
+                googleMapOptionsFactory = { GoogleMapOptions().mapId(BuildConfig.MAP_ID) }) {//Cloud 콘솔에 있는 구글 맵 ID
+                val pinConfig = PinConfig.builder().setBackgroundColor(Colorg.RED).setBorderColor(Colorg.WHITE).build()//랜드마크를 표현할 마커 설정
+                landmarkArray.forEach { nl ->//검색된 랜드마크들의 위치에 마커 표현
+                    val ll = LatLng(nl.locate.latitude, nl.locate.longitude)
+                    AdvancedMarker(
+                        state = MarkerState(ll),
+                        pinConfig = pinConfig,
+                        onClick = { it ->//마커가 눌렸을때 하단의 랜드마크 정보창 Open
+                            placeName.value = nl.name
+                            scope.launch { bottomSheetState.show() }
+                            false
+                        },
+                        onInfoWindowClose = {scope.launch { bottomSheetState.hide() }})//다른 곳을 터치했을때 하단의 랜드마크 정보창 Close
+                }
 
-    }
+                val userLoc = LatLng(userLocation.latitude, userLocation.longitude)
+                Marker(state = rememberMarkerState("user",userLoc), icon =  BitmapDescriptorFactory.fromResource(R.drawable.ic_current_location))//사용자의 위치에 파란 마커 표시
+
+            }
+        })
 }
 
-//@Preview(showBackground = true)
+
+@Preview(showBackground = true)
 @Composable
 fun GreetingPreview() {
     val loc = Location("TEST")
@@ -184,6 +176,6 @@ fun GreetingPreview() {
     user.latitude = 52.9715
     user.longitude = -9.4411821
     TravelEyeTheme {
-        MapView(arr,user)
+        LandMarkInfoMap(arr,user, LocalContext.current)
     }
 }

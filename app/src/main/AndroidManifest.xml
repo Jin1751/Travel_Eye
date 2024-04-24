@@ -21,6 +21,11 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.TravelEye">
+        <activity
+            android:name=".ExplainLandMark"
+            android:exported="false"
+            android:label="@string/title_activity_explain_land_mark"
+            android:theme="@style/Theme.TravelEye" />
 
         <meta-data
             android:name="com.google.android.geo.API_KEY"
