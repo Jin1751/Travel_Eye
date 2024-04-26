@@ -2,4 +2,5 @@
     <string name="app_name">Travel Eye</string>
     <string name="title_activity_success_landmark">SuccessLandmark</string>
     <string name="title_activity_maps">MapsActivity</string>
+    <string name="title_activity_explain_land_mark">ExplainLandMark</string>
 </resources>
