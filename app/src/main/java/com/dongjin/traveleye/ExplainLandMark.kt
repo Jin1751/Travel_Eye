@@ -5,12 +5,17 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
@@ -23,8 +28,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,7 +61,7 @@ class ExplainLandMark : ComponentActivity() {
         super.onCreate(savedInstanceState)
         landmarkIntent = intent
         landmarkName = landmarkIntent.getStringExtra("LandmarkName")!!
-
+        Log.d("API", BuildConfig.GEMINI_API_KEY.toString())
         val aiScope = CoroutineScope(Dispatchers.Main)
         lateinit var response : GenerateContentResponse
         aiScope.launch {
@@ -93,18 +105,31 @@ class ExplainLandMark : ComponentActivity() {
 
 @Composable
 fun LandmarkDescription(landmarkName: String, description: MutableState<String>, modifier: Modifier = Modifier) {
-    Column {
+    Column(modifier = modifier.fillMaxSize()) {
         Text(
             text = landmarkName,
-            modifier = modifier,
-            fontSize = 30.sp
+            modifier = modifier.offset(x= 10.dp,y=35.dp).
+            drawBehind {
+                val y = size.height
+                drawLine(Color.Black,
+                Offset(0f, y), Offset(size.width, y),2f
+            ) },
+            lineHeight = 32.sp,
+            fontSize = 30.sp,
+            fontWeight = FontWeight.Bold
         )
-        Spacer(modifier = modifier.height(30.dp))
+        Spacer(modifier = modifier.height(60.dp))
+        Box(modifier = modifier.padding(5.dp).border(2.dp,Color.Black,RectangleShape)){
+            Text(
+                text = description.value,
+                modifier = modifier.verticalScroll(rememberScrollState()).padding(start=10.dp, end = 10.dp).offset(y=20.dp),
+                fontSize = 20.sp,
+                lineHeight = 33.sp,
+                letterSpacing = 1.sp,
 
-        Text(
-            text = description.value,
-            modifier = modifier.verticalScroll(rememberScrollState())
-        )
+                )
+        }
+
     }
 
 }
