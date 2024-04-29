@@ -52,15 +52,24 @@ import com.google.maps.android.compose.CameraPositionState
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.googleMapFactory
 import com.google.maps.android.compose.rememberMarkerState
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.Translator
+import com.google.mlkit.nl.translate.TranslatorOptions
 import kotlinx.coroutines.launch
 
 @Parcelize
-data class NearLandmark(val name: String, val score: Double, val locate : Location) : Parcelable
+data class NearLandmark(var name: String, val score: Double, val locate : Location) : Parcelable
 
 class SuccessLandmark : ComponentActivity() {
     private lateinit var locationIntent : Intent
     private lateinit var userLocation :Location
+    private val landmarkArray : MutableList<NearLandmark> = mutableListOf()//랜드마크들을 저장할 리스트
+    private lateinit var engKorTranslator : Translator
+    private lateinit var translatorCondition : DownloadConditions
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         locationIntent = intent
@@ -70,22 +79,10 @@ class SuccessLandmark : ComponentActivity() {
             locationIntent.getParcelableExtra("userLocation")!!
         }
         Log.d("SUCCESS USERLOC", userLocation.latitude.toString() + ", " + userLocation.longitude)
-        val totalLandmark = locationIntent.getIntExtra("totalLandmark",0)//인텐트에 있는 랜드마크의 갯수
-        val landmarkArray : MutableList<NearLandmark> = mutableListOf()//랜드마크들을 저장할 리스트
-        for (i in 1..totalLandmark){//인텐트에 있는 랜드마크를 모두 리스트에 저장
-           val lm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-               locationIntent.getParcelableExtra("landMark$i",NearLandmark::class.java)
-            } else{
-               locationIntent.getParcelableExtra("landMark$i")
-            }
-            if (lm != null) {//랜드마크가 null이 아닐 경우만 리스트에 저장
-                landmarkArray.add(lm)
-                Log.d("LandMark$i", lm.name + ", " + lm.score)
-            }
-            else{
-                Log.d("LandMark$i", "NULL")
-            }
-        }
+        val langOptions = TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.ENGLISH).setTargetLanguage(TranslateLanguage.KOREAN).build()
+        engKorTranslator = Translation.getClient(langOptions)
+        translatorCondition = DownloadConditions.Builder().requireWifi().build()
+        engKorTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Toast.makeText(this,"번역 언어 다운로드 오류",Toast.LENGTH_LONG).show() }
 
        setContent {
                 TravelEyeTheme {
@@ -100,7 +97,31 @@ class SuccessLandmark : ComponentActivity() {
 
            }
        }
+    override fun onStart(){
+        super.onStart()
+        val totalLandmark = locationIntent.getIntExtra("totalLandmark",0)//인텐트에 있는 랜드마크의 갯수
+
+        for (i in 1..totalLandmark){//인텐트에 있는 랜드마크를 모두 리스트에 저장
+            val lm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                locationIntent.getParcelableExtra("landMark$i",NearLandmark::class.java)
+            } else{
+                locationIntent.getParcelableExtra("landMark$i")
+            }
+            if (lm != null) {//랜드마크가 null이 아닐 경우만 리스트에 저장
+                engKorTranslator.translate(lm.name).addOnSuccessListener {
+                    lm.name = it
+                }
+                landmarkArray.add(lm)
+                Log.d("LandMark$i", lm.name + ", " + lm.score)
+            }
+            else{
+                Log.d("LandMark$i", "NULL")
+            }
+        }
+
+    }
 }
+
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
@@ -111,6 +132,8 @@ fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Loc
     val scope = rememberCoroutineScope()//하단의 정보창을 끄고 킬 때 사용할 코루딘 스코프
     val bottomSheetState = rememberModalBottomSheetState(initialValue = ModalBottomSheetValue.Hidden)//하단 정보창의 상태를 컨트롤 할 상태 변수
     val placeName = mutableStateOf("Please Select LandMark")//랜드마크 이름을 표시할 텍스트 뷰에 들어갈 이름 변수
+
+
     ModalBottomSheetLayout(//지도 하단에 표시될 랜드마크 정보창 & 구글 맵
         sheetState = bottomSheetState, sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
         sheetContent = @Composable {
@@ -124,7 +147,6 @@ fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Loc
                     .width(deviceInfo.screenWidthDp.dp)
                     .height((deviceInfo.screenHeightDp * 0.065).dp), shape = RoundedCornerShape(10.dp)
                     ,onClick = {
-                        Toast.makeText(context, "AI 검색 토스트", Toast.LENGTH_LONG).show()
                         val intent = Intent(context, ExplainLandMark::class.java)
                         intent.putExtra("LandmarkName", placeName.value)
                         startActivity(context,intent,null)})// AI 설명을 요청할 버튼

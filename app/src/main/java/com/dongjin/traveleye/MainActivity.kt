@@ -57,6 +57,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.FileProvider
 import com.dongjin.traveleye.ui.theme.TravelEyeTheme
 import com.google.android.gms.tasks.Task
+import com.google.android.gms.tasks.Tasks.await
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
@@ -72,6 +73,17 @@ import com.google.firebase.ktx.Firebase
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.Translator
+import com.google.mlkit.nl.translate.TranslatorOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import okhttp3.internal.wait
 import java.io.ByteArrayOutputStream
 import kotlin.system.exitProcess
 
@@ -89,6 +101,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var auth: FirebaseAuth
     private var isSearchImg = mutableStateOf(false)
     private var showProgress = mutableStateOf(false)
+    private lateinit var engKorTranslator : Translator
+    private lateinit var translatorCondition : DownloadConditions
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -110,12 +124,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
         this.auth.signInAnonymously()//firebase에 익명 사용자로 로그인
+        val langOptions = TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.ENGLISH).setTargetLanguage(TranslateLanguage.KOREAN).build()
+        engKorTranslator = Translation.getClient(langOptions)
+        translatorCondition = DownloadConditions.Builder().requireWifi().build()
+        engKorTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Toast.makeText(this,"번역 언어 다운로드 오류",Toast.LENGTH_LONG).show() }
 
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         locationListener = LocationListener { location ->
             userLocation = location
             getAddress()
         }
+
         setContent {
             TravelEyeTheme {
                 // A surface container using the 'background' color from the theme
@@ -145,6 +164,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+
         Log.d("onResume", "onResume")
         if (isSearchImg.value){//이전 액티비티가 카메라 촬영 액티비티였다면 CLoud Vision API 검색 작업 실행
             showProgress.value = true
@@ -190,7 +210,7 @@ class MainActivity : ComponentActivity() {
                         var totalLandmark = 0
                         for (label in task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray) {// 검색 결과를 순서대로 출력
                             val labelObj = label.asJsonObject
-                            val landmarkName = labelObj["description"].asString//명소이름
+                            var landmarkName = labelObj["description"].asString//명소이름
                             val score = labelObj["score"].asDouble//해당 명소일 확률(?)
 
 
@@ -199,7 +219,6 @@ class MainActivity : ComponentActivity() {
 
                             // Multiple locations are possible, e.g., the location of the depicted
                             // landmark and the location the picture was taken.
-
                             for (loc in labelObj["locations"].asJsonArray) {
                                 val latitude = loc.asJsonObject["latLng"].asJsonObject["latitude"]
                                 val longitude = loc.asJsonObject["latLng"].asJsonObject["longitude"]
@@ -208,8 +227,7 @@ class MainActivity : ComponentActivity() {
                                 place.longitude = longitude.asDouble
                                 if (userLocation.distanceTo(place) < 5000){
                                     totalLandmark += 1
-
-                                    Log.d("VISION $totalLandmark", "Distance: " + userLocation.distanceTo(place))
+                                    Log.d("VISION $totalLandmark", "Distance: " + userLocation.distanceTo(place) + ", LANDMARK NAME: " + landmarkName)
                                     val landmark = NearLandmark(landmarkName, score, place)
                                     intent.putExtra("landMark$totalLandmark", landmark)
                                 }
@@ -238,6 +256,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         Log.d("onStop", "onStop")
+        //engKorTranslator.close()
         stopLocationUpdate()
     }
 
@@ -287,7 +306,7 @@ class MainActivity : ComponentActivity() {
         ) {
             return
         }
-        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 60000,10f, locationListener, Looper.getMainLooper())
+        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5000,10f, locationListener, Looper.getMainLooper())
 
     }//사용자의 위치좌표를 가져올 함수, 5분에 한번씩 가져온다
     private fun stopLocationUpdate(){
@@ -297,8 +316,17 @@ class MainActivity : ComponentActivity() {
         val geocoder = Geocoder(this, Locale.getDefault())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU){ // API 33부턴 getFromLocation이 deprecated 돼 api 수준에 따라 분리함
             val geoListener = GeocodeListener {
-                addresses -> country.value = addresses[0].countryName
-                city.value = addresses[0].adminArea
+                addresses ->
+                engKorTranslator.translate(addresses[0].countryName).addOnSuccessListener {
+                    country.value =  it
+                    Log.d("TransLation Success", "번역 성공: ${addresses[0].countryName}, $it")
+                }
+                engKorTranslator.translate(addresses[0].adminArea).addOnSuccessListener {
+                    city.value =  it
+                    Log.d("TransLation Success", "번역 성공: ${addresses[0].adminArea}, $it")
+                }
+                //country.value = transelateWord(addresses[0].countryName)
+                //city.value = transelateWord(addresses[0].adminArea)
             }
             geocoder.getFromLocation(userLocation.latitude,userLocation.longitude,1,geoListener)
         }
@@ -307,8 +335,18 @@ class MainActivity : ComponentActivity() {
             if (addr != null) {
                 if (addr.isNotEmpty()){
                     val address = addr[0]
-                    country.value = address.countryName
-                    city.value = address.adminArea
+                    engKorTranslator.translate(address.countryName).addOnSuccessListener {
+                        country.value =  it
+                        Log.d("TransLation Success", "번역 성공: ${address.countryName}, $it")
+                    }
+                    engKorTranslator.translate(address.adminArea).addOnSuccessListener {
+                        city.value =  it
+                        Log.d("TransLation Success", "번역 성공: ${address.adminArea}, $it")
+                    }
+                    //country.value = transelateWord(address.countryName)
+                    //city.value = transelateWord(address.adminArea)
+                    //country.value = address.countryName
+                    //city.value = address.adminArea
                 }
             }
         }
@@ -347,6 +385,18 @@ class MainActivity : ComponentActivity() {
             }
     }//Firebase에 사진 전달
     private fun updateUI(user: FirebaseUser?) {//Firebase 로그인한 사용자에 맞게 Ui 업데이트
+    }
+    private fun transelateWord(word : String) : String {
+        var trans = "nope"
+        val scope = CoroutineScope(Dispatchers.Main)
+
+        scope.launch {
+            val task = async (Dispatchers.Main) {
+
+            }
+            task.await()
+        }
+        return trans
     }
 }
 
