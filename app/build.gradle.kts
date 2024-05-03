@@ -94,6 +94,7 @@ dependencies {
     implementation("com.google.ai.client.generativeai:generativeai:0.4.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("com.google.mlkit:translate:17.0.2")
+    implementation("com.google.mlkit:common:18.10.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")

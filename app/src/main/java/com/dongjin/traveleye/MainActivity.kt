@@ -22,42 +22,61 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.core.app.ActivityCompat
 import androidx.core.content.FileProvider
 import com.dongjin.traveleye.ui.theme.TravelEyeTheme
 import com.google.android.gms.tasks.Task
-import com.google.android.gms.tasks.Tasks.await
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
@@ -78,16 +97,10 @@ import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import okhttp3.internal.wait
 import java.io.ByteArrayOutputStream
 import kotlin.system.exitProcess
 
-class MainActivity : ComponentActivity() {
+open class MainActivity : ComponentActivity() {
     private lateinit var locationManager : LocationManager
     private lateinit var locationListener : LocationListener
     private lateinit var userLocation : Location
@@ -103,6 +116,8 @@ class MainActivity : ComponentActivity() {
     private var showProgress = mutableStateOf(false)
     private lateinit var engKorTranslator : Translator
     private lateinit var translatorCondition : DownloadConditions
+    private var languageSetting = mutableStateOf("korean")
+    private val openDialog = mutableStateOf(false)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -124,16 +139,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
         this.auth.signInAnonymously()//firebase에 익명 사용자로 로그인
-        val langOptions = TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.ENGLISH).setTargetLanguage(TranslateLanguage.KOREAN).build()
-        engKorTranslator = Translation.getClient(langOptions)
-        translatorCondition = DownloadConditions.Builder().requireWifi().build()
-        engKorTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Toast.makeText(this,"번역 언어 다운로드 오류",Toast.LENGTH_LONG).show() }
+        val langOptions = TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.ENGLISH).setTargetLanguage(TranslateLanguage.KOREAN).build()//영어 -> 한국어 번역옵션 설정
+        engKorTranslator = Translation.getClient(langOptions)//mlkit 번역기 생성
+        translatorCondition = DownloadConditions.Builder().requireWifi().build()// 번역 언어 다운로드 상태 체크 오브젝트
+        engKorTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Toast.makeText(this,"번역 언어 다운로드 오류",Toast.LENGTH_LONG).show() }//번역 언어 다운로드
 
-        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager//위치 정보 접근 오브젝트 생성
         locationListener = LocationListener { location ->
             userLocation = location
             getAddress()
-        }
+        }// 위치 정보가 바뀌었을때 반응할 리스너 오브젝트
 
         setContent {
             TravelEyeTheme {
@@ -142,8 +157,9 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainActivity(country, city, searchTxt,imgUri,isSearchImg)
-                    circularProgressBar(showProgress = showProgress)
+                    MainActivity(city, country, searchTxt, imgUri, isSearchImg, languageSetting, engKorTranslator, openDialog)//
+                    CircularProgressBar(showProgress = showProgress)
+                    AIDialog(openDialog = openDialog)
                 }
             }
         }
@@ -168,7 +184,11 @@ class MainActivity : ComponentActivity() {
         Log.d("onResume", "onResume")
         if (isSearchImg.value){//이전 액티비티가 카메라 촬영 액티비티였다면 CLoud Vision API 검색 작업 실행
             showProgress.value = true
-            searchTxt.value = "   검색중"
+            searchTxt.value = when(languageSetting.value){
+                "korean" -> " 검색중..."
+                "english" -> "Searching..."
+                else -> " 검색중..."
+            }
             val inputStream = contentResolver.openInputStream(imgUri.value)
             bitmapImg.value = BitmapFactory.decodeStream(inputStream)//Cloud Vision API에 보낼 이미지를 Uri에서 비트맵으로 변환
             inputStream?.close()
@@ -197,7 +217,11 @@ class MainActivity : ComponentActivity() {
                 if (task.isSuccessful){//Firebase 통신으로 Cloud Vision API와 통신완료 시
                     val e = task.exception
                     showProgress.value = false
-                    searchTxt.value = "장소 검색"
+                    searchTxt.value = when(languageSetting.value){
+                        "korean" -> "장소 검색"
+                        "english" -> "Search Place"
+                        else -> "장소 검색"
+                    }
                     if (e is FirebaseFunctionsException) {//통신은 됐으나 익셉션이 생겼을때
                         val code = e.code
                         val details = e.details
@@ -210,7 +234,7 @@ class MainActivity : ComponentActivity() {
                         var totalLandmark = 0
                         for (label in task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray) {// 검색 결과를 순서대로 출력
                             val labelObj = label.asJsonObject
-                            var landmarkName = labelObj["description"].asString//명소이름
+                            val landmarkName = labelObj["description"].asString//명소이름
                             val score = labelObj["score"].asDouble//해당 명소일 확률(?)
 
 
@@ -225,10 +249,10 @@ class MainActivity : ComponentActivity() {
                                 val place = Location(LocationManager.GPS_PROVIDER)
                                 place.latitude = latitude.asDouble
                                 place.longitude = longitude.asDouble
-                                if (userLocation.distanceTo(place) < 5000){
+                                if (userLocation.distanceTo(place) < 5000){//사용자와 5km이내의 장소만 저장
                                     totalLandmark += 1
                                     Log.d("VISION $totalLandmark", "Distance: " + userLocation.distanceTo(place) + ", LANDMARK NAME: " + landmarkName)
-                                    val landmark = NearLandmark(landmarkName, score, place)
+                                    val landmark = NearLandmark(landmarkName, landmarkName, score, place)
                                     intent.putExtra("landMark$totalLandmark", landmark)
                                 }
                                 Log.d("VISION", "Distance: " + userLocation.distanceTo(place))
@@ -237,6 +261,7 @@ class MainActivity : ComponentActivity() {
                         }
                         isSearchImg.value = false
                         intent.putExtra("totalLandmark",totalLandmark)
+                        intent.putExtra("languageSetting", languageSetting.value)
                         startActivity(intent)
                     }
 
@@ -317,16 +342,19 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU){ // API 33부턴 getFromLocation이 deprecated 돼 api 수준에 따라 분리함
             val geoListener = GeocodeListener {
                 addresses ->
-                engKorTranslator.translate(addresses[0].countryName).addOnSuccessListener {
-                    country.value =  it
-                    Log.d("TransLation Success", "번역 성공: ${addresses[0].countryName}, $it")
+                if (languageSetting.value != "english") {//언어 설정이 영어가 아닌 경우 번역기로 나라, 도시 번역
+                    engKorTranslator.translate(addresses[0].countryName).addOnSuccessListener {
+                        country.value = it
+                    }
+                    engKorTranslator.translate(addresses[0].adminArea).addOnSuccessListener {
+                        city.value = it
+                    }
                 }
-                engKorTranslator.translate(addresses[0].adminArea).addOnSuccessListener {
-                    city.value =  it
-                    Log.d("TransLation Success", "번역 성공: ${addresses[0].adminArea}, $it")
+                else{
+                    country.value = addresses[0].countryName
+                    city.value = addresses[0].adminArea
                 }
-                //country.value = transelateWord(addresses[0].countryName)
-                //city.value = transelateWord(addresses[0].adminArea)
+
             }
             geocoder.getFromLocation(userLocation.latitude,userLocation.longitude,1,geoListener)
         }
@@ -335,18 +363,18 @@ class MainActivity : ComponentActivity() {
             if (addr != null) {
                 if (addr.isNotEmpty()){
                     val address = addr[0]
-                    engKorTranslator.translate(address.countryName).addOnSuccessListener {
-                        country.value =  it
-                        Log.d("TransLation Success", "번역 성공: ${address.countryName}, $it")
+                    if (languageSetting.value != "english"){//언어 설정이 영어가 아닌 경우 번역기로 나라, 도시 번역
+                        engKorTranslator.translate(address.countryName).addOnSuccessListener {
+                            country.value =  it
+                        }
+                        engKorTranslator.translate(address.adminArea).addOnSuccessListener {
+                            city.value =  it
+                        }
                     }
-                    engKorTranslator.translate(address.adminArea).addOnSuccessListener {
-                        city.value =  it
-                        Log.d("TransLation Success", "번역 성공: ${address.adminArea}, $it")
+                    else{
+                        country.value = address.countryName
+                        city.value = address.adminArea
                     }
-                    //country.value = transelateWord(address.countryName)
-                    //city.value = transelateWord(address.adminArea)
-                    //country.value = address.countryName
-                    //city.value = address.adminArea
                 }
             }
         }
@@ -359,15 +387,10 @@ class MainActivity : ComponentActivity() {
         var resizedHeight = 640
         if (originalHeight > originalWidth) {
             resizedHeight = 640
-            resizedWidth =
-                (resizedHeight * originalWidth.toFloat() / originalHeight.toFloat()).toInt()
+            resizedWidth = (resizedHeight * originalWidth.toFloat() / originalHeight.toFloat()).toInt()
         } else if (originalWidth > originalHeight) {
             resizedWidth = 640
-            resizedHeight =
-                (resizedWidth * originalHeight.toFloat() / originalWidth.toFloat()).toInt()
-        } else if (originalHeight == originalWidth) {
-            resizedHeight = 640
-            resizedWidth = 640
+            resizedHeight = (resizedWidth * originalHeight.toFloat() / originalWidth.toFloat()).toInt()
         }
         return Bitmap.createScaledBitmap(bitmap, resizedWidth, resizedHeight, false)
     }//Cloud Vision API에 보낼 사진을 규격에 맞게 조절
@@ -386,31 +409,31 @@ class MainActivity : ComponentActivity() {
     }//Firebase에 사진 전달
     private fun updateUI(user: FirebaseUser?) {//Firebase 로그인한 사용자에 맞게 Ui 업데이트
     }
-    private fun transelateWord(word : String) : String {
-        var trans = "nope"
-        val scope = CoroutineScope(Dispatchers.Main)
-
-        scope.launch {
-            val task = async (Dispatchers.Main) {
-
-            }
-            task.await()
-        }
-        return trans
-    }
 }
 
 @Composable
-fun MainActivity(cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>, modifier: Modifier = Modifier) {
-
+//fun MainActivity(cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>, languageSetting: MutableState<String>, modifier: Modifier = Modifier) {
+fun MainActivity(cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>, languageSetting: MutableState<String>, translator: Translator, openDialog: MutableState<Boolean>, modifier: Modifier = Modifier) {
+    val contxt = LocalContext.current
     val config = LocalConfiguration.current
     val screenH = config.screenHeightDp.dp
-    val screenW = config.screenWidthDp.dp
     Column(modifier.fillMaxSize()) {
         Spacer(modifier = modifier.height(20.dp))
         UserLocaleTxt(cityState = cityState, countryState = countryState)
-        Spacer(modifier = modifier.height(screenH/4))
-        CameraBtn(screenW, searchTxt,imgUri, isSearch)
+        Column (modifier = modifier.offset(y = screenH/4), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            CameraBtn(searchTxt,imgUri, isSearch, contxt)
+            SelectTranslation(languageSetting, cityState, countryState, searchTxt,translator)//
+            IconButton(modifier = modifier
+                .offset(y = (screenH / 9))
+                .size(60.dp)
+                .border(3.dp, Color.Blue, CircleShape),
+                onClick = {
+                    openDialog.value = true
+                }) {
+                Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AIDialog", tint = Color.Blue, modifier = modifier.size(40.dp))
+            }
+        }
+
     }
 
 }
@@ -418,21 +441,26 @@ fun MainActivity(cityState: MutableState<String>, countryState: MutableState<Str
 @Composable
 fun UserLocaleTxt(cityState: MutableState<String>, countryState: MutableState<String>, modifier: Modifier = Modifier){
     Row{
-        Spacer(modifier = modifier.width(15.dp))
+        Spacer(modifier = modifier.width(10.dp))
         Icon(imageVector = Icons.Filled.Place, contentDescription = "user_locale",
-            modifier.size(40.dp),tint = Color.Black)
-        Text(text = (cityState.value + ", "), fontSize = 25.sp)// 텍스트를 외부에서 바꾸기 위해선 mutableState의 Value를 외부에서 바꾸면, 컴포즈는 State를 받아 안에 있는 value를 받아 사용한다.
-        Text(text = countryState.value, fontSize = 25.sp)
+            modifier
+                .size(40.dp)
+                .offset(y = 10.dp),tint = Color.Black)
+        Column (modifier = modifier.offset(x = 5.dp)) {
+            Text(text = countryState.value, fontSize = 25.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text = cityState.value, fontSize = 25.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)// 텍스트를 외부에서 바꾸기 위해선 mutableState의 Value를 외부에서 바꾸면, 컴포즈는 State를 받아 안에 있는 value를 받아 사용한다.
+        }
+
     }
 }
 
 @Composable
 
-fun CameraBtn(screenW : Dp, searchTxt: MutableState<String>,imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>,modifier: Modifier = Modifier){
+fun CameraBtn(searchTxt: MutableState<String>,imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>,contxt: Context,modifier: Modifier = Modifier){
     val btnColor = ButtonDefaults.buttonColors(Color(0,179,219,255))
     val btnElevation = ButtonDefaults.buttonElevation(defaultElevation = 7.dp)
-    val context = LocalContext.current
-    val uri = context.createTmpImageUri()
+    //val uri = Uri.EMPTY
+    val uri = contxt.createTmpImageUri()
     val camLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.TakePicture(), onResult = {
         Log.d("CAMERA LAUNCHER", it.toString())
         if (it){
@@ -440,9 +468,8 @@ fun CameraBtn(screenW : Dp, searchTxt: MutableState<String>,imgUri: MutableState
                 isSearch.value = true
             }
          })
-    Column {
-        Row {
-            Spacer(modifier = modifier.width(screenW / 4))
+    Column{
+        Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             ElevatedButton(onClick = {
                 camLauncher.launch(uri)
             }, modifier.size(200.dp),shape = RoundedCornerShape(50.dp), colors = btnColor, elevation = btnElevation) {
@@ -456,12 +483,52 @@ fun CameraBtn(screenW : Dp, searchTxt: MutableState<String>,imgUri: MutableState
             }
         }
         Row{
-            Spacer(modifier = modifier.width((screenW / 3) + 14.dp) )
-            Text(text=searchTxt.value,fontSize = 25.sp, fontWeight = FontWeight.Bold)
+            Text(text=searchTxt.value,fontSize = 25.sp, fontWeight = FontWeight.Bold, modifier = modifier.fillMaxWidth(), textAlign = TextAlign.Center)
         }
 
     }
 
+}//
+@Composable
+fun SelectTranslation(languageSetting: MutableState<String>, cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, translator: Translator, modifier: Modifier = Modifier){
+    var expandState by remember { mutableStateOf(false) }
+    val language = when (languageSetting.value) {
+        "korean" -> "한국어"
+        "english" -> "English"
+        else -> {"Language"}
+    }
+    val langOptions = TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.KOREAN).setTargetLanguage(TranslateLanguage.ENGLISH).build()//영어 -> 한국어 번역옵션 설정
+    val korEngTranslator = Translation.getClient(langOptions)//mlkit 번역기 생성
+    val translatorCondition = DownloadConditions.Builder().requireWifi().build()// 번역 언어 다운로드 상태 체크 오브젝트
+    korEngTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Log.d("KOR2Eng", "Download Error") }//번역 언어 다운로드
+
+    TextButton(onClick = { expandState = true }, shape = RoundedCornerShape(5.dp), modifier = modifier
+        .width(150.dp)
+        .offset(y = 15.dp)
+        .border(2.dp, Color.Black, RectangleShape)) {
+        Icon(imageVector = Icons.Default.Translate, contentDescription = "translate", tint = Color.Black)
+        Text(text = "  $language  ", color =  Color.Black)
+        Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "open_menu", tint = Color.Black)
+    }
+    Column (modifier.offset(x = (-50).dp,y=20.dp)) {
+        DropdownMenu(expanded = expandState, onDismissRequest = { expandState = false },modifier.wrapContentSize()) {
+            DropdownMenuItem(text = { Text("한국어") },
+                onClick = {
+                    languageSetting.value = "korean"
+                    translator.translate(cityState.value).addOnSuccessListener { cityState.value = it }
+                    translator.translate(countryState.value).addOnSuccessListener { countryState.value = it }
+                    searchTxt.value = "장소 검색"
+                    expandState = false
+            })
+            DropdownMenuItem(text = { Text("English") },
+                onClick = {
+                    languageSetting.value = "english"
+                    korEngTranslator.translate(cityState.value).addOnSuccessListener { cityState.value = it }
+                    korEngTranslator.translate(countryState.value).addOnSuccessListener { countryState.value = it }
+                    searchTxt.value = "Search Place"
+                    expandState = false })
+        }
+    }
 }
 
 fun Context.createTmpImageUri(
@@ -470,22 +537,20 @@ fun Context.createTmpImageUri(
     fileExtension: String = ".png"
 ): Uri {
     val tmpFile = File.createTempFile(fileName, fileExtension, cacheDir).apply { createNewFile() }
+    Log.d("Photo", FileProvider.getUriForFile(applicationContext, provider, tmpFile).toString())
     return FileProvider.getUriForFile(applicationContext, provider, tmpFile)
 } // 찍은 이미지를 Uri로 사용하기 위한 함수
 
 @Composable
-private fun circularProgressBar(showProgress : MutableState<Boolean>, modifier: Modifier = Modifier) {
+private fun CircularProgressBar(showProgress : MutableState<Boolean>, modifier: Modifier = Modifier) {
     val loading by remember { showProgress }
 
     if (!loading) return
 
-    val config = LocalConfiguration.current
-    val screenH = config.screenHeightDp.dp
-    val screenW = config.screenWidthDp.dp
-    Column (modifier = modifier.fillMaxSize()) {
-        Spacer(modifier = modifier.height((screenH / 2) - 75.dp))
-        Row (modifier = modifier.fillMaxSize()) {
-            Spacer(modifier = modifier.width((screenW / 2) - 33.5.dp))
+    Column (modifier = modifier
+        .fillMaxSize()
+        .offset(y = (-28).dp)) {
+        Row (modifier = modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             CircularProgressIndicator(
                 modifier = Modifier.width(61.5.dp),
                 color = Color.Yellow,
@@ -495,3 +560,50 @@ private fun circularProgressBar(showProgress : MutableState<Boolean>, modifier: 
     }
 
 }// API로부터 결과값을 받아올 때까지 처리중을 표시할 원형 프로그래스 바
+@Composable
+private fun AIDialog(openDialog : MutableState<Boolean>,modifier: Modifier = Modifier){
+    when {
+        openDialog.value ->
+            Dialog(onDismissRequest = { openDialog.value = false }) {
+                Card(modifier = Modifier
+                    .fillMaxWidth()
+                    .height(225.dp),
+                    shape = RoundedCornerShape(16.dp))
+                {
+                    Text(
+                        text = "이 앱은 AI로 작동합니다.\n AI의 상태에 따라 \n부정확한 답변이 나올 수 있습니다.\n 장소 설명은 참고만 하시기 바랍니다.",
+                        modifier = modifier
+                            .fillMaxWidth()
+                            .offset(y = 40.dp),
+                        textAlign = TextAlign.Center,
+                        fontSize = 20.sp
+                    )
+                    TextButton(onClick = { openDialog.value = false },
+                        modifier.offset(x = 215.dp, y= 65.dp)) {
+                        Text(text = "OKAY", color = Color.Blue, fontSize = 25.sp)
+                    }
+                }
+            }
+    }
+
+}
+
+@Preview(showBackground = true)
+@Composable
+fun MainPreview() {
+   //val cityState = mutableStateOf("Seoul")
+   //val countryState = mutableStateOf("Korea")
+   //val searchTxt = mutableStateOf("장소검색")
+   //val img = mutableStateOf(Uri.EMPTY)
+   //val isSearch = mutableStateOf(false)
+   //val languageSetting = mutableStateOf("korean")
+   // val openDialog = mutableStateOf(true)
+   //val langOptions = TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.ENGLISH).setTargetLanguage(TranslateLanguage.KOREAN).build()
+   //val translator = Translation.getClient(TranslatorOptions.Builder().build())
+   TravelEyeTheme {
+       //MainActivity(cityState,countryState,searchTxt,img,isSearch, languageSetting)
+       CircularProgressBar(showProgress = mutableStateOf(true))
+       //AIDialog(openDialog = openDialog)
+   }
+}
+
