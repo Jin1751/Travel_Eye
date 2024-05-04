@@ -18,15 +18,13 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material3.Card
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,7 +36,6 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -51,7 +48,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.dongjin.traveleye.ui.theme.TravelEyeTheme
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.BlockThreshold
@@ -99,7 +95,7 @@ class ExplainLandMark : ComponentActivity() {
                 ) {
                     LandmarkDescription(landmarkName, translatedName, description, openDialog)
                     circularProgress(showProgress = showProgress)//Gemini Response가 오기 전까지 원형 프로그래스바 실행
-                    aiDialog(openDialog = openDialog)
+                    aiDialog(openDialog = openDialog, languageSetting = languageSetting)
                 }
             }
         }
@@ -126,6 +122,7 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
         Text(
             text = landmarkName,
             modifier = modifier
+                .fillMaxWidth(0.95f)
                 .offset(x = 10.dp, y = 30.dp)
                 .drawBehind {
                     val y = size.height
@@ -143,6 +140,7 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
         Row(modifier = modifier.offset(x = 10.dp, y = 38.dp)){
             Icon(imageVector = Icons.Default.Translate, contentDescription = "translate", tint = Color.Gray)
             Text(text = " $translatedName",
+                modifier = modifier.fillMaxWidth(0.95f),
                 lineHeight = 32.sp,
                 fontSize = 20.sp,
                 color = Color.Gray,
@@ -159,9 +157,8 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
             onClick = {
                 openDialog.value = true
             }) {
-            Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AIDialog", tint = Color.Blue, modifier = modifier.size(35.dp))
+            Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AIDialog", tint = Color(38,124,240,255), modifier = modifier.size(35.dp))
         }
-
         Box(modifier = modifier
             .padding(5.dp)
             .border(2.dp, Color.Black, RectangleShape)
@@ -175,8 +172,7 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
                     .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 20.dp),
                 fontSize = 20.sp,
                 lineHeight = 33.sp,
-                letterSpacing = 1.sp,
-                maxLines = 100
+                letterSpacing = 1.sp
                 )
         }
 
@@ -184,30 +180,27 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
 
 }
 @Composable
-private fun aiDialog(openDialog : MutableState<Boolean>,modifier: Modifier = Modifier){
+private fun aiDialog(openDialog : MutableState<Boolean>, languageSetting : String,modifier: Modifier = Modifier){
+    val dialogTxt = when(languageSetting)  {
+        "korean" -> "본 앱은 AI 기술을 활용하므로\n정보 오류 가능성이 있습니다.\n 장소 정보는 참고용으로만 \n사용하시길 권장합니다."
+
+        else -> "This app utilizes AI.\nTherefore it may contain errors in landmark information.\nPlease use landmark information as reference only."
+    }
     when {
         openDialog.value ->
-            Dialog(onDismissRequest = { openDialog.value = false }) {
-            Card(modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .padding(16.dp),
-                shape = RoundedCornerShape(16.dp))
-            {
-                Text(
-                    text = "이 설명은 AI로 만들어진 설명입니다.\n 부정확한 설명이 있을 수 있습니다.",
-                    modifier = modifier.fillMaxWidth().offset(y=50.dp),
-                    textAlign = TextAlign.Center,
-                )
-                TextButton(onClick = { openDialog.value = false },
-                    modifier.offset(x = 220.dp, y= 70.dp)) {
-                    Text(text = "OKAY", color = Color.Blue)
-                }
-            }
-        }
+            AlertDialog(
+                modifier = modifier.fillMaxWidth(),
+                icon = { androidx.compose.material3.Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "ExplainAIDialog", tint = Color.Gray, modifier = modifier.size(40.dp)) },
+                text = { Text(text = dialogTxt, fontSize = 20.sp, textAlign = TextAlign.Center,lineHeight = 30.sp, letterSpacing = 1.sp)},
+                onDismissRequest = { openDialog.value = false },
+                confirmButton = {
+                    TextButton(onClick = { openDialog.value = false }) {
+                        Text(text = "OKAY", color = Color.Blue, fontSize = 25.sp)
+                    }
+                })
     }
-
 }
+
 
 @Composable
 private fun circularProgress(showProgress : MutableState<Boolean>, modifier: Modifier = Modifier) {
@@ -239,6 +232,6 @@ fun GreetingPreview2() {
     val di = mutableStateOf(false)
     TravelEyeTheme {
         LandmarkDescription("Android","HELLO WORLD",ts,di)
-        aiDialog(openDialog = di)
+        aiDialog(openDialog = di, "english")
     }
 }

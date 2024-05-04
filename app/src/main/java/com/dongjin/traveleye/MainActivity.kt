@@ -34,16 +34,16 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -72,7 +72,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.core.app.ActivityCompat
 import androidx.core.content.FileProvider
 import com.dongjin.traveleye.ui.theme.TravelEyeTheme
@@ -118,6 +117,8 @@ open class MainActivity : ComponentActivity() {
     private lateinit var translatorCondition : DownloadConditions
     private var languageSetting = mutableStateOf("korean")
     private val openDialog = mutableStateOf(false)
+    private val errorOccurred = mutableStateOf(false)
+    private val errorValue = mutableStateOf("NOT_FOUND")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -159,7 +160,8 @@ open class MainActivity : ComponentActivity() {
                 ) {
                     MainActivity(city, country, searchTxt, imgUri, isSearchImg, languageSetting, engKorTranslator, openDialog)//
                     CircularProgressBar(showProgress = showProgress)
-                    AIDialog(openDialog = openDialog)
+                    AIDialog(openDialog = openDialog, languageSetting = languageSetting)
+                    ErrorDialog(errorOccurred = errorOccurred, errorValue = errorValue, languageSetting = languageSetting)
                 }
             }
         }
@@ -227,7 +229,8 @@ open class MainActivity : ComponentActivity() {
                         val details = e.details
                     }
                     if (task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray.size() == 0){//통신은 됐으나 장소를 찾지 못했을 경우
-                        Toast.makeText(this,"검색에 실패했습니다.", Toast.LENGTH_LONG).show()
+                        errorOccurred.value = true
+                        errorValue.value = "NOT_FOUND"
                         Log.d("0 Result", "검색에 실패했습니다.")
                     }
                     else{//검색 결과가 있을 경우
@@ -425,12 +428,12 @@ fun MainActivity(cityState: MutableState<String>, countryState: MutableState<Str
             SelectTranslation(languageSetting, cityState, countryState, searchTxt,translator)//
             IconButton(modifier = modifier
                 .offset(y = (screenH / 9))
-                .size(60.dp)
-                .border(3.dp, Color.Blue, CircleShape),
+                .size(60.dp),
+                //.border(3.dp, Color.Blue, CircleShape),
                 onClick = {
                     openDialog.value = true
                 }) {
-                Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AIDialog", tint = Color.Blue, modifier = modifier.size(40.dp))
+                Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AIDialog", tint = Color(38,124,240,255), modifier = modifier.size(40.dp))
             }
         }
 
@@ -561,31 +564,94 @@ private fun CircularProgressBar(showProgress : MutableState<Boolean>, modifier: 
 
 }// API로부터 결과값을 받아올 때까지 처리중을 표시할 원형 프로그래스 바
 @Composable
-private fun AIDialog(openDialog : MutableState<Boolean>,modifier: Modifier = Modifier){
+private fun AIDialog(openDialog : MutableState<Boolean>, languageSetting: MutableState<String>, modifier: Modifier = Modifier){
+    val dialogTxt = when(languageSetting.value)  {
+       "korean" -> {
+          "본 앱은 AI 기술을 활용하므로\n각종 오류가 생길 수 있습니다.\n장소 정보 및 검색은\n참고용으로만 활용하시길\n 권장합니다."
+       }
+
+       else ->{
+          "This app utilizes AI.\nTherefore it may occur several errors.\nPlease use landmark information & search results as reference only."
+       }
+    }
     when {
         openDialog.value ->
-            Dialog(onDismissRequest = { openDialog.value = false }) {
-                Card(modifier = Modifier
-                    .fillMaxWidth()
-                    .height(225.dp),
-                    shape = RoundedCornerShape(16.dp))
-                {
-                    Text(
-                        text = "이 앱은 AI로 작동합니다.\n AI의 상태에 따라 \n부정확한 답변이 나올 수 있습니다.\n 장소 설명은 참고만 하시기 바랍니다.",
-                        modifier = modifier
-                            .fillMaxWidth()
-                            .offset(y = 40.dp),
-                        textAlign = TextAlign.Center,
-                        fontSize = 20.sp
-                    )
-                    TextButton(onClick = { openDialog.value = false },
-                        modifier.offset(x = 215.dp, y= 65.dp)) {
-                        Text(text = "OKAY", color = Color.Blue, fontSize = 25.sp)
-                    }
+            AlertDialog(
+                modifier = modifier.fillMaxWidth(),
+                icon = {Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "MainAIDialog", tint = Color.Gray, modifier = modifier.size(40.dp))},
+                text = { Text(text = dialogTxt, fontSize = 20.sp, textAlign = TextAlign.Center,lineHeight = 30.sp, letterSpacing = 1.sp)},
+                onDismissRequest = { openDialog.value = false },
+                confirmButton = {
+                        TextButton(onClick = { openDialog.value = false }) {
+                            Text(text = "OKAY", color = Color.Blue, fontSize = 25.sp)
+                        }
+                })
+    }
+}
+
+@Composable
+private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorValue: MutableState<String>, languageSetting: MutableState<String>, modifier: Modifier = Modifier){
+    var titleTxt = ""
+    var errorTxt = ""
+
+    when (languageSetting.value){
+        "korean" -> {
+            when (errorValue.value){
+                "NOT_FOUND" -> {
+                    titleTxt = "검색 결과 없음"
+                    errorTxt = "검색된 장소가 없습니다."
+                }
+                "VISION_ERR" -> {
+                    titleTxt = "장소 검색 오류"
+                    errorTxt = "사진 검색 AI에서\n오류가 발생했습니다."
+                }
+                "MAP_ERR" -> {
+                    titleTxt = "지도 오류"
+                    errorTxt = "지도를 표현하던 중\n 오류가 발생했습니다."
+                }
+                "GEMINI_ERR" -> {
+                    titleTxt = "장소 정보 오류"
+                    errorTxt = "장소 정보 AI에서\n오류가 발생했습니다."
                 }
             }
+        }
+        else -> {
+            when (errorValue.value){
+                "NOT_FOUND" -> {
+                    titleTxt = "No Search Result"
+                    errorTxt = "Can't find landmark\nfrom the picture"
+                }
+                "VISION_ERR" -> {
+                    titleTxt = "Place Search Error"
+                    errorTxt = "Error occurred from Vision AI"
+                }
+                "MAP_ERR" -> {
+                    titleTxt = "Map Error"
+                    errorTxt = "Erorr occurred from map"
+                }
+                "GEMINI_ERR" -> {
+                    titleTxt = "Place Information Error"
+                    errorTxt = "Error occurred from\nPlace Information AI"
+                }
+            }
+        }
     }
 
+    when {
+        errorOccurred.value -> {
+            AlertDialog(
+                icon = {Icon(imageVector = Icons.Default.ErrorOutline, contentDescription = "ErrorDialog", tint = Color.Gray, modifier = modifier.size(40.dp))},
+                title = { Text(text = titleTxt, textAlign = TextAlign.Center) },
+                text = { Text(text = errorTxt, textAlign = TextAlign.Center, fontSize = 23.sp, lineHeight = 30.sp, letterSpacing = 1.sp) },
+                onDismissRequest = { errorOccurred.value = false },
+                confirmButton = {
+                    TextButton(onClick = { errorOccurred.value = false }) {
+                        Text(text = "OKAY", color = Color.Blue, fontSize = 25.sp)
+                    }
+                })
+            Log.d("AI Error", "AI ERROR OCCURRED")
+        }
+    }
 }
 
 @Preview(showBackground = true)
@@ -596,14 +662,17 @@ fun MainPreview() {
    //val searchTxt = mutableStateOf("장소검색")
    //val img = mutableStateOf(Uri.EMPTY)
    //val isSearch = mutableStateOf(false)
-   //val languageSetting = mutableStateOf("korean")
-   // val openDialog = mutableStateOf(true)
+   //val languageSetting = mutableStateOf("english")
+   //val openDialog = mutableStateOf(true)
    //val langOptions = TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.ENGLISH).setTargetLanguage(TranslateLanguage.KOREAN).build()
    //val translator = Translation.getClient(TranslatorOptions.Builder().build())
+   //val errorOccurred = mutableStateOf(true)
+   //val errorValue = mutableStateOf("VISION_ERR")//NOT_FOUND, VISION_ERR, MAP_ERR, GEMINI_ERR
    TravelEyeTheme {
        //MainActivity(cityState,countryState,searchTxt,img,isSearch, languageSetting)
        CircularProgressBar(showProgress = mutableStateOf(true))
-       //AIDialog(openDialog = openDialog)
+       //ErrorDialog(errorOccurred = errorOccurred, errorValue = errorValue, languageSetting = languageSetting)
+       //AIDialog(openDialog = openDialog, languageSetting)
    }
 }
 
