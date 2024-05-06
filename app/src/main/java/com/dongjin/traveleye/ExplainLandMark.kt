@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -40,8 +41,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,6 +71,7 @@ class ExplainLandMark : ComponentActivity() {
     private var showProgress = mutableStateOf(true)
     private lateinit var languageSetting : String
     private val openDialog = mutableStateOf(false)
+    private lateinit var response : GenerateContentResponse
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         landmarkIntent = intent
@@ -75,15 +79,16 @@ class ExplainLandMark : ComponentActivity() {
         translatedName = landmarkIntent.getStringExtra("TranslatedName")!!
         languageSetting = landmarkIntent.getStringExtra("languageSetting")!!
         val aiScope = CoroutineScope(Dispatchers.Main)//Gemini 사용을 위한 코루틴 스코프
-        lateinit var response : GenerateContentResponse
-        aiScope.launch {//코루틴 실행
-            val task = async (Dispatchers.Main) {
-                response =  askGemini(landmarkName)//Gemini에게 장소에 대한 설명 요청
+        if (description.value == ""){
+            aiScope.launch {//코루틴 실행
+                val task = async (Dispatchers.Main) {
+                    response =  askGemini(landmarkName)//Gemini에게 장소에 대한 설명 요청
+                }
+                task.await()//Gemini Response를 받을 때까지 wait
+                description.value = response.text!!
+                if (task.isCompleted) { showProgress.value = false}
+                Log.d("GEMINI RESPONSE", response.text.toString())
             }
-            task.await()//Gemini Response를 받을 때까지 wait
-            description.value = response.text!!
-            if (task.isCompleted) { showProgress.value = false}
-            Log.d("GEMINI RESPONSE", response.text.toString())
         }
 
         setContent {
@@ -99,6 +104,11 @@ class ExplainLandMark : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        description.value = ""
     }
 
     private suspend fun askGemini(landmarkName: String): GenerateContentResponse {
@@ -118,17 +128,28 @@ class ExplainLandMark : ComponentActivity() {
 
 @Composable
 fun LandmarkDescription(landmarkName: String, translatedName : String, description: MutableState<String>, openDialog: MutableState<Boolean>,modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val lineColor = when (context.resources.configuration.uiMode) {//스마트폰 다크모드와 라이트 모드에 따라 이름 밑줄 색을 결정
+        33 -> {//다크모드일때
+            Color.White
+        }
+        else -> {//라이트 모드일때
+            Color.Black
+        }
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
+
         Text(
             text = landmarkName,
             modifier = modifier
                 .fillMaxWidth(0.95f)
                 .offset(x = 10.dp, y = 30.dp)
                 .drawBehind {
-                    val y = size.height
+                    val y = size.height + 10
                     drawLine(
-                        Color.Black,
-                        Offset(0f, y), Offset(size.width, y), 2f
+                        color = lineColor,
+                        Offset(0f, y), Offset(size.width, y), 5f,
                     )
                 },
             lineHeight = 32.sp,
@@ -137,7 +158,7 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
             maxLines = 1,
             overflow =  TextOverflow.Ellipsis
         )
-        Row(modifier = modifier.offset(x = 10.dp, y = 38.dp)){
+        Row(modifier = modifier.offset(x = 10.dp, y = 40.dp)){
             Icon(imageVector = Icons.Default.Translate, contentDescription = "translate", tint = Color.Gray)
             Text(text = " $translatedName",
                 modifier = modifier.fillMaxWidth(0.95f),
@@ -149,7 +170,7 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
                 overflow =  TextOverflow.Ellipsis)
         }
 
-        Spacer(modifier = modifier.height(30.dp))
+        Spacer(modifier = modifier.height(32.dp))
         val screenW = LocalConfiguration.current.screenWidthDp
         IconButton(modifier = modifier
             .offset(x = (screenW - 55).dp)
@@ -161,7 +182,7 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
         }
         Box(modifier = modifier
             .padding(5.dp)
-            .border(2.dp, Color.Black, RectangleShape)
+            .border(2.dp, LocalContentColor.current, RectangleShape)
             .fillMaxWidth()
             .fillMaxHeight()
             ){
@@ -195,7 +216,7 @@ private fun aiDialog(openDialog : MutableState<Boolean>, languageSetting : Strin
                 onDismissRequest = { openDialog.value = false },
                 confirmButton = {
                     TextButton(onClick = { openDialog.value = false }) {
-                        Text(text = "OKAY", color = Color.Blue, fontSize = 25.sp)
+                        Text(text = "OKAY", fontSize = 25.sp)
                     }
                 })
     }
@@ -230,7 +251,7 @@ private fun circularProgress(showProgress : MutableState<Boolean>, modifier: Mod
 fun GreetingPreview2() {
     val ts = mutableStateOf("Hello")
     val di = mutableStateOf(false)
-    TravelEyeTheme {
+    TravelEyeTheme (darkTheme = true) {
         LandmarkDescription("Android","HELLO WORLD",ts,di)
         aiDialog(openDialog = di, "english")
     }

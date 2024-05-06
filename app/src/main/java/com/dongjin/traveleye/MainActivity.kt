@@ -50,6 +50,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -75,6 +76,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.FileProvider
 import com.dongjin.traveleye.ui.theme.TravelEyeTheme
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 import com.google.android.gms.tasks.Task
 import com.google.gson.Gson
 import com.google.gson.JsonElement
@@ -102,6 +105,7 @@ import kotlin.system.exitProcess
 open class MainActivity : ComponentActivity() {
     private lateinit var locationManager : LocationManager
     private lateinit var locationListener : LocationListener
+    private lateinit var fusedLocationClient : FusedLocationProviderClient
     private lateinit var userLocation : Location
     private var country = mutableStateOf("나라")
     private var city = mutableStateOf("도시")
@@ -145,14 +149,24 @@ open class MainActivity : ComponentActivity() {
         translatorCondition = DownloadConditions.Builder().requireWifi().build()// 번역 언어 다운로드 상태 체크 오브젝트
         engKorTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Toast.makeText(this,"번역 언어 다운로드 오류",Toast.LENGTH_LONG).show() }//번역 언어 다운로드
 
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        try{//앱 시작시 바로 검색을 하면 에러가 발생해 가장 최근에 알려진 장소를 먼저 사용자 위치로 설정, 위치 권한 설정이 안 돼있을 수 있어 try-catch로 작성함
+            fusedLocationClient.lastLocation.addOnSuccessListener {
+                userLocation = it//fusedLocation은 여러 위치 제공자를 융합해 정확한 최신 위치 정보를 제공하지만 배터리 소모가 큼, 앱이 실행됐을때 맨 처음 위치를 잡아야해서 fusedLocation을 사용했음, 이후엔 리소스 절약을 위해 LocationManager사용
+                getAddress()
+            }
+        }catch (_: SecurityException){
+            checkPermissions()
+        }
+
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager//위치 정보 접근 오브젝트 생성
         locationListener = LocationListener { location ->
             userLocation = location
             getAddress()
         }// 위치 정보가 바뀌었을때 반응할 리스너 오브젝트
-
         setContent {
             TravelEyeTheme {
+
                 // A surface container using the 'background' color from the theme
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -176,6 +190,7 @@ open class MainActivity : ComponentActivity() {
         super.onStart()
         Log.d("onStart", "onStart")
         checkPermissions()
+
         startLocationUpdate()
 
     }
@@ -227,12 +242,12 @@ open class MainActivity : ComponentActivity() {
                     if (e is FirebaseFunctionsException) {//통신은 됐으나 익셉션이 생겼을때
                         val code = e.code
                         val details = e.details
+                        errorOccurred.value = true
+                        errorValue.value = "VISION_ERR"
                     }
                     if (task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray.size() == 0){//통신은 됐으나 장소를 찾지 못했을 경우
                         errorOccurred.value = true
-                        errorValue.value = "NOT_FOUND"
-                        Log.d("0 Result", "검색에 실패했습니다.")
-                    }
+                        errorValue.value = "NOT_FOUND" }
                     else{//검색 결과가 있을 경우
                         var totalLandmark = 0
                         for (label in task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray) {// 검색 결과를 순서대로 출력
@@ -299,7 +314,14 @@ open class MainActivity : ComponentActivity() {
         {permissions ->
             permissions.entries.forEach{(permission, isGranted) ->
                 when{
-                    isGranted -> {}
+                    isGranted -> {
+                        try{
+                            fusedLocationClient.lastLocation.addOnSuccessListener {
+                                userLocation = it
+                            }
+                        }catch (_: SecurityException){
+                        }
+                    }
                     !isGranted -> {
                         if (permission == Manifest.permission.ACCESS_FINE_LOCATION){
                             shouldShowRequestPermissionRationale(permission)
@@ -321,6 +343,8 @@ open class MainActivity : ComponentActivity() {
             }
         } //권한이 거부 상태일 경우 토스트 메시지 출력 후 종료
         requestPermissions.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.CAMERA))
+
+
     }//사진, 위치 등 권한 체크를 하는 함수
 
     private fun startLocationUpdate(){
@@ -429,7 +453,6 @@ fun MainActivity(cityState: MutableState<String>, countryState: MutableState<Str
             IconButton(modifier = modifier
                 .offset(y = (screenH / 9))
                 .size(60.dp),
-                //.border(3.dp, Color.Blue, CircleShape),
                 onClick = {
                     openDialog.value = true
                 }) {
@@ -448,7 +471,7 @@ fun UserLocaleTxt(cityState: MutableState<String>, countryState: MutableState<St
         Icon(imageVector = Icons.Filled.Place, contentDescription = "user_locale",
             modifier
                 .size(40.dp)
-                .offset(y = 10.dp),tint = Color.Black)
+                .offset(y = 10.dp), tint = LocalContentColor.current)
         Column (modifier = modifier.offset(x = 5.dp)) {
             Text(text = countryState.value, fontSize = 25.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(text = cityState.value, fontSize = 25.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)// 텍스트를 외부에서 바꾸기 위해선 mutableState의 Value를 외부에서 바꾸면, 컴포즈는 State를 받아 안에 있는 value를 받아 사용한다.
@@ -505,13 +528,16 @@ fun SelectTranslation(languageSetting: MutableState<String>, cityState: MutableS
     val translatorCondition = DownloadConditions.Builder().requireWifi().build()// 번역 언어 다운로드 상태 체크 오브젝트
     korEngTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Log.d("KOR2Eng", "Download Error") }//번역 언어 다운로드
 
-    TextButton(onClick = { expandState = true }, shape = RoundedCornerShape(5.dp), modifier = modifier
-        .width(150.dp)
-        .offset(y = 15.dp)
-        .border(2.dp, Color.Black, RectangleShape)) {
-        Icon(imageVector = Icons.Default.Translate, contentDescription = "translate", tint = Color.Black)
-        Text(text = "  $language  ", color =  Color.Black)
-        Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "open_menu", tint = Color.Black)
+    TextButton(onClick = { expandState = true }, shape = RoundedCornerShape(5.dp),
+        colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current),
+        modifier = modifier
+            .width(150.dp)
+            .offset(y = 15.dp)
+            .border(2.dp, LocalContentColor.current, RectangleShape)) {
+        Log.d("COLORRRRRRR", MaterialTheme.colorScheme.toString())
+        Icon(imageVector = Icons.Default.Translate, contentDescription = "translate")
+        Text(text = "  $language  ")
+        Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "open_menu")
     }
     Column (modifier.offset(x = (-50).dp,y=20.dp)) {
         DropdownMenu(expanded = expandState, onDismissRequest = { expandState = false },modifier.wrapContentSize()) {
@@ -583,7 +609,7 @@ private fun AIDialog(openDialog : MutableState<Boolean>, languageSetting: Mutabl
                 onDismissRequest = { openDialog.value = false },
                 confirmButton = {
                         TextButton(onClick = { openDialog.value = false }) {
-                            Text(text = "OKAY", color = Color.Blue, fontSize = 25.sp)
+                            Text(text = "OKAY", fontSize = 25.sp)
                         }
                 })
     }
@@ -646,7 +672,7 @@ private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorValue: Mutabl
                 onDismissRequest = { errorOccurred.value = false },
                 confirmButton = {
                     TextButton(onClick = { errorOccurred.value = false }) {
-                        Text(text = "OKAY", color = Color.Blue, fontSize = 25.sp)
+                        Text(text = "OKAY", fontSize = 25.sp)
                     }
                 })
             Log.d("AI Error", "AI ERROR OCCURRED")

@@ -26,6 +26,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.rememberModalBottomSheetState
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -140,14 +142,24 @@ fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Loc
     val placeName = mutableStateOf("Please Select LandMark")//랜드마크 이름을 표시할 텍스트 뷰에 들어갈 이름 변수
     val translatedName = mutableStateOf("Please Select LandMark")
 
+    val backgroundColor = when (context.resources.configuration.uiMode) {//스마트폰 다크모드와 라이트 모드에 따라 하단 정보창 배경색을 결정
+       33 -> {//다크모드일때
+            Color.Black
+        }
+        else -> {//라이트 모드일때
+            Color.White
+        }
+    }
+
     ModalBottomSheetLayout(//지도 하단에 표시될 랜드마크 정보창 & 구글 맵
-        sheetState = bottomSheetState, sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+        sheetState = bottomSheetState, sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), sheetContentColor = LocalContentColor.current, sheetBackgroundColor = backgroundColor,
         sheetContent = @Composable {
             Column {
                 Row(modifier = modifier.offset(x = (deviceInfo.screenWidthDp / 2 - 30).dp)){
-                    Icon(modifier = modifier.offset(y = (-10).dp),imageVector = ImageVector.vectorResource(R.drawable.handle), contentDescription = "")
+                    Icon(modifier = modifier.offset(y = (-10).dp),imageVector = ImageVector.vectorResource(R.drawable.handle), contentDescription = "handle")
                 }//하단 랜드마크 정보창의 핸들 배치
-                Text(modifier = modifier.offset(x=5.dp, y = (-15).dp),text = placeName.value, color = Color.Black, fontSize = 25.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)//선택된 랜드마크의 이름
+
+                Text(modifier = modifier.offset(x=5.dp, y = (-15).dp),text = placeName.value,fontSize = 25.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)//선택된 랜드마크의 이름
                 Row(modifier = modifier.offset(x = 8.dp)){
                     Icon(imageVector = Icons.Default.Translate, contentDescription = "translate", tint = Color.Gray)
                     Text(modifier = modifier.offset(x=5.dp, y = (-5).dp),text = translatedName.value, color = Color.Gray, fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)//선택된 랜드마크의 이름
@@ -155,7 +167,8 @@ fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Loc
                 Spacer(modifier = modifier.height(20.dp))
                 Button(modifier = modifier
                     .width(deviceInfo.screenWidthDp.dp)
-                    .height((deviceInfo.screenHeightDp * 0.065).dp), shape = RoundedCornerShape(10.dp)
+                    .height((deviceInfo.screenHeightDp * 0.065).dp), shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(38,122,240), contentColor = Color.White)
                     ,onClick = {
                         val intent = Intent(context, ExplainLandMark::class.java)
                         intent.putExtra("languageSetting", languageSetting)
@@ -163,7 +176,7 @@ fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Loc
                         intent.putExtra("TranslatedName", translatedName.value)
                         startActivity(context,intent,null)})// AI 설명을 요청할 버튼
                 {
-                    Text(buttonTxt[languageSetting]!!, fontSize = 20.sp)
+                    Text(buttonTxt[languageSetting]!!,fontSize = 20.sp)
                 }
                 Spacer(modifier = modifier.height(3.dp))
             }
@@ -208,7 +221,8 @@ fun GreetingPreview() {
 
     user.latitude = 52.9715
     user.longitude = -9.4411821
-    TravelEyeTheme {
+    TravelEyeTheme (darkTheme = false) {
+
         LandMarkInfoMap(arr, user, "korean", buttonTxt)
     }
 }
