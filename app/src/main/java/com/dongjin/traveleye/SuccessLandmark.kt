@@ -1,7 +1,10 @@
 package com.dongjin.traveleye
 
+import android.content.Context
 import android.content.Intent
 import android.location.Location
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.Bundle
 import android.os.Parcelable
@@ -9,6 +12,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -67,16 +71,38 @@ import kotlinx.coroutines.launch
 data class NearLandmark(var engName: String, var translatedName : String, val score: Double, val locate : Location) : Parcelable
 
 class SuccessLandmark : ComponentActivity() {
+
+    private lateinit var connectionManager: ConnectivityManager
+    private lateinit var networkCallback : ConnectivityManager.NetworkCallback
+    private lateinit var errorIntent : Intent
+
     private lateinit var locationIntent : Intent
+
     private lateinit var userLocation :Location
+
     private val landmarkArray : MutableList<NearLandmark> = mutableListOf()//랜드마크들을 저장할 리스트
+
     private lateinit var engKorTranslator : Translator
     private lateinit var translatorCondition : DownloadConditions
     private lateinit var languageSetting : String
     private val translateLanguage = mapOf("korean" to TranslateLanguage.KOREAN, "english" to TranslateLanguage.ENGLISH)
+
     private val buttonTxt = mapOf("korean" to "AI 설명 보기", "english" to "See AI Description")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        errorIntent = Intent(this, MainActivity::class.java)
+        networkCallback = object : ConnectivityManager.NetworkCallback(){
+            override fun onLost(network: Network) {//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
+                super.onLost(network)
+                backToMainActivity(true,"CONNECTION_LOST")
+            }
+        }
+        connectionManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        connectionManager.registerDefaultNetworkCallback(networkCallback)
+        when (connectionManager.activeNetwork){//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
+            null -> backToMainActivity(true,"CONNECTION_LOST")
+        }
+
         locationIntent = intent
         userLocation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {//빌드 버전 33 이상 시 인텐트에서 사용자 위치 가져오는 작업
             locationIntent.getParcelableExtra("userLocation",Location::class.java)!!
@@ -128,6 +154,14 @@ class SuccessLandmark : ComponentActivity() {
         }
 
     }
+
+    private fun backToMainActivity(isError : Boolean, errorMsg : String){
+        onDestroy()
+        finish()
+        errorIntent.putExtra("isError", isError)
+        errorIntent.putExtra("errorMsg", errorMsg)
+        startActivity(errorIntent)
+    }
 }
 
 
@@ -152,7 +186,9 @@ fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Loc
     }
 
     ModalBottomSheetLayout(//지도 하단에 표시될 랜드마크 정보창 & 구글 맵
-        sheetState = bottomSheetState, sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), sheetContentColor = LocalContentColor.current, sheetBackgroundColor = backgroundColor,
+        sheetState = bottomSheetState, sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+        sheetContentColor = LocalContentColor.current, sheetBackgroundColor = backgroundColor,
+        sheetElevation = 10.dp,
         sheetContent = @Composable {
             Column {
                 Row(modifier = modifier.offset(x = (deviceInfo.screenWidthDp / 2 - 30).dp)){
@@ -182,28 +218,31 @@ fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Loc
             }
         },
         content = {//랜드마크 설명 창 외에 표시 될 콘텐츠 [구글 지도]
-            GoogleMap(
-                modifier = modifier.fillMaxSize(),
-                cameraPositionState = CameraPositionState(mapCamera),
-                properties = MapProperties(isMyLocationEnabled = true),
-                googleMapOptionsFactory = { GoogleMapOptions().mapId(BuildConfig.MAP_ID) }) {//Cloud 콘솔에 있는 구글 맵 ID
-                val pinConfig = PinConfig.builder().setBackgroundColor(Colorg.RED).setBorderColor(Colorg.WHITE).build()//랜드마크를 표현할 마커 설정
-                var indexNum = 0
-                landmarkArray.forEach { nl ->//검색된 랜드마크들의 위치에 마커 표현
-                    val ll = LatLng(nl.locate.latitude, nl.locate.longitude)
-                    AdvancedMarker(
-                        state = MarkerState(ll),
-                        pinConfig = pinConfig,
-                        onClick = {//마커가 눌렸을때 하단의 랜드마크 정보창 Open
-                            placeName.value = nl.engName
-                            translatedName.value = nl.translatedName
-                            scope.launch { bottomSheetState.show() }
-                            false
-                        },
-                        onInfoWindowClose = {scope.launch { bottomSheetState.hide() }})//다른 곳을 터치했을때 하단의 랜드마크 정보창 Close
-                    indexNum += 1
+            Box{
+                GoogleMap(
+                    modifier = modifier.fillMaxSize(),
+                    cameraPositionState = CameraPositionState(mapCamera),
+                    properties = MapProperties(isMyLocationEnabled = true),
+                    googleMapOptionsFactory = { GoogleMapOptions().mapId(BuildConfig.MAP_ID) }) {//Cloud 콘솔에 있는 구글 맵 ID
+                    val pinConfig = PinConfig.builder().setBackgroundColor(Colorg.RED).setBorderColor(Colorg.WHITE).build()//랜드마크를 표현할 마커 설정
+                    var indexNum = 0
+                    landmarkArray.forEach { nl ->//검색된 랜드마크들의 위치에 마커 표현
+                        val ll = LatLng(nl.locate.latitude, nl.locate.longitude)
+                        AdvancedMarker(
+                            state = MarkerState(ll),
+                            pinConfig = pinConfig,
+                            onClick = {//마커가 눌렸을때 하단의 랜드마크 정보창 Open
+                                placeName.value = nl.engName
+                                translatedName.value = nl.translatedName
+                                scope.launch { bottomSheetState.show() }
+                                false
+                            },
+                            onInfoWindowClose = {scope.launch { bottomSheetState.hide() }})//다른 곳을 터치했을때 하단의 랜드마크 정보창 Close
+                        indexNum += 1
+                    }
                 }
             }
+
         })
 }
 

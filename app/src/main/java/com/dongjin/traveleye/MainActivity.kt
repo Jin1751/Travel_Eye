@@ -11,6 +11,9 @@ import android.location.Geocoder.GeocodeListener
 import android.location.LocationListener
 import android.location.LocationManager
 import android.location.Location
+import android.net.ConnectivityManager
+import android.net.ConnectivityManager.NetworkCallback
+import android.net.Network
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -60,6 +63,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -99,33 +103,87 @@ import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.ByteArrayOutputStream
-import kotlin.system.exitProcess
 
 open class MainActivity : ComponentActivity() {
+
+    private lateinit var dataStore: StoreLanguageSetting
+
+    private lateinit var connectionManager: ConnectivityManager
+    private lateinit var networkCallback : NetworkCallback
+
     private lateinit var locationManager : LocationManager
     private lateinit var locationListener : LocationListener
     private lateinit var fusedLocationClient : FusedLocationProviderClient
     private lateinit var userLocation : Location
+
     private var country = mutableStateOf("나라")
     private var city = mutableStateOf("도시")
+
+    private var disableBtn = mutableStateOf(false)
     private var searchTxt = mutableStateOf("장소 검색")
+
     private var imgUri = mutableStateOf(Uri.EMPTY)
     private val initBitmap = Bitmap.createBitmap(1000, 1000, Bitmap.Config.ARGB_8888)
     private var bitmapImg = mutableStateOf(initBitmap)
+    private var isSearchImg = mutableStateOf(false)
+
     private lateinit var functions: FirebaseFunctions
     private lateinit var auth: FirebaseAuth
-    private var isSearchImg = mutableStateOf(false)
+
     private var showProgress = mutableStateOf(false)
+
     private lateinit var engKorTranslator : Translator
     private lateinit var translatorCondition : DownloadConditions
     private var languageSetting = mutableStateOf("korean")
+
     private val openDialog = mutableStateOf(false)
+
     private val errorOccurred = mutableStateOf(false)
-    private val errorValue = mutableStateOf("NOT_FOUND")
+    private val errorState = mutableStateOf("CONNECTION_LOST")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        dataStore = StoreLanguageSetting(this)
+        runBlocking {
+            languageSetting.value = dataStore.getLanguageSetting.first()//앱 시작시 저장된 언어 설정을 가지고 오기까지 잠시 대기
+        }
+        searchTxt.value = when(languageSetting.value){//언어 설정에 맞는 장소검색 텍스트 설정
+            "korean" -> "장소 검색"
+            "english" -> "Search Place"
+            else -> "장소 검색"
+        }
+
+        networkCallback = object : NetworkCallback(){//네트워크 연결 상태에 따라 반응할 오브젝트
+            override fun onAvailable(network: Network) {//네트워크 연결이 가능할 때
+                super.onAvailable(network)
+                errorOccurred.value = false
+                disableBtn.value = false
+            }
+
+            override fun onLost(network: Network) {//네트워크 연결이 안됐을 때 오류 메시지 출력
+                super.onLost(network)
+                errorOccurred.value = true
+                errorState.value = "CONNECTION_LOST"
+                disableBtn.value = true
+            }
+        }
+        connectionManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        connectionManager.registerDefaultNetworkCallback(networkCallback)//네트워크 연결 상태에 따라 반응할 오브젝트를 콜백함수로 설정
+        when (connectionManager.activeNetwork){//연결 가능한 네트워크가 없을 때 오류 메세지 출력
+            null -> {
+                errorOccurred.value = true
+                errorState.value = "CONNECTION_LOST"
+                disableBtn.value = true
+            }
+            else -> {
+                errorOccurred.value = false
+                disableBtn.value = false
+            }
+        }
         auth = Firebase.auth
         val currentUser = auth.currentUser
         updateUI(currentUser)
@@ -164,6 +222,9 @@ open class MainActivity : ComponentActivity() {
             userLocation = location
             getAddress()
         }// 위치 정보가 바뀌었을때 반응할 리스너 오브젝트
+
+
+
         setContent {
             TravelEyeTheme {
 
@@ -172,10 +233,11 @@ open class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainActivity(city, country, searchTxt, imgUri, isSearchImg, languageSetting, engKorTranslator, openDialog)//
+
+                    MainActivity(dataStore, city, country, searchTxt, disableBtn, imgUri, isSearchImg, languageSetting, engKorTranslator, openDialog)
                     CircularProgressBar(showProgress = showProgress)
                     AIDialog(openDialog = openDialog, languageSetting = languageSetting)
-                    ErrorDialog(errorOccurred = errorOccurred, errorValue = errorValue, languageSetting = languageSetting)
+                    ErrorDialog(errorOccurred = errorOccurred, errorValue = errorState, languageSetting = languageSetting)
                 }
             }
         }
@@ -183,6 +245,7 @@ open class MainActivity : ComponentActivity() {
 
     override fun onRestart() {
         super.onRestart()
+
         Log.d("onRestart", "onRestart")
     }
 
@@ -190,9 +253,14 @@ open class MainActivity : ComponentActivity() {
         super.onStart()
         Log.d("onStart", "onStart")
         checkPermissions()
-
         startLocationUpdate()
-
+        val mainErrorIntent = intent//다른 엑티비티에서 에러로 MainActivity로 왔을때 사용할 intent
+        errorOccurred.value = mainErrorIntent.getBooleanExtra("isError", false)
+        if (errorOccurred.value) {//에러가 발생했다는 extra가 있으면 에러 다이얼로그 출력
+            errorState.value = mainErrorIntent.getStringExtra("errorMsg")!!//에러 유형 extra 참조
+            Log.d("MAIN GEMINI ERROR occ", errorOccurred.value.toString())
+            Log.d("MAIN GEMINI ERROR sta", errorState.value)
+        }
     }
 
     override fun onResume() {
@@ -243,11 +311,11 @@ open class MainActivity : ComponentActivity() {
                         val code = e.code
                         val details = e.details
                         errorOccurred.value = true
-                        errorValue.value = "VISION_ERR"
+                        errorState.value = "VISION_ERR"
                     }
                     if (task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray.size() == 0){//통신은 됐으나 장소를 찾지 못했을 경우
                         errorOccurred.value = true
-                        errorValue.value = "NOT_FOUND" }
+                        errorState.value = "NOT_FOUND" }
                     else{//검색 결과가 있을 경우
                         var totalLandmark = 0
                         for (label in task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray) {// 검색 결과를 순서대로 출력
@@ -284,8 +352,12 @@ open class MainActivity : ComponentActivity() {
                     }
 
                 }
-                else{Log.d("VISION", "FAIL")}
-                }//Firebase를 통해 Cloud Vision API에 request 후 결과에 따른 리스너
+                else{//Cloud Vision API와 통신 실패시 에러 메세지 출력
+                    errorOccurred.value = true
+                    errorState.value = "VISION_ERR"
+                    Log.d("VISION", "FAIL")
+                }
+            }//Firebase를 통해 Cloud Vision API에 request 후 결과에 따른 리스너
             isSearchImg.value = false
             Log.d("VISION isSearchImg", isSearchImg.value.toString())
         }
@@ -306,7 +378,9 @@ open class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         Log.d("onDestroy", "onDestroy")
         super.onDestroy()
+        connectionManager.unregisterNetworkCallback(networkCallback)
     }
+
 
     private fun checkPermissions(){
         val requestPermissions = registerForActivityResult(
@@ -326,14 +400,12 @@ open class MainActivity : ComponentActivity() {
                         if (permission == Manifest.permission.ACCESS_FINE_LOCATION){
                             shouldShowRequestPermissionRationale(permission)
                             Toast.makeText(this, "위치 권한을 허용해주세요", Toast.LENGTH_SHORT).show()
-                            ActivityCompat.finishAffinity(this)
-                            exitProcess(0)
+                            finish()
                         }
                         if (permission == Manifest.permission.CAMERA) {
                             shouldShowRequestPermissionRationale(permission)
                             Toast.makeText(this, "카메라 권한을 허용해주세요", Toast.LENGTH_SHORT).show()
-                            ActivityCompat.finishAffinity(this)
-                            exitProcess(0)
+                            finish()
                         }
                     }
                     else -> {
@@ -434,13 +506,15 @@ open class MainActivity : ComponentActivity() {
                 JsonParser.parseString(Gson().toJson(result))
             }
     }//Firebase에 사진 전달
+
+
     private fun updateUI(user: FirebaseUser?) {//Firebase 로그인한 사용자에 맞게 Ui 업데이트
     }
 }
 
 @Composable
 //fun MainActivity(cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>, languageSetting: MutableState<String>, modifier: Modifier = Modifier) {
-fun MainActivity(cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>, languageSetting: MutableState<String>, translator: Translator, openDialog: MutableState<Boolean>, modifier: Modifier = Modifier) {
+fun MainActivity(dataStore: StoreLanguageSetting , cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, disableBtn : MutableState<Boolean>, imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>, languageSetting: MutableState<String>, translator: Translator, openDialog: MutableState<Boolean>, modifier: Modifier = Modifier) {
     val contxt = LocalContext.current
     val config = LocalConfiguration.current
     val screenH = config.screenHeightDp.dp
@@ -448,8 +522,8 @@ fun MainActivity(cityState: MutableState<String>, countryState: MutableState<Str
         Spacer(modifier = modifier.height(20.dp))
         UserLocaleTxt(cityState = cityState, countryState = countryState)
         Column (modifier = modifier.offset(y = screenH/4), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            CameraBtn(searchTxt,imgUri, isSearch, contxt)
-            SelectTranslation(languageSetting, cityState, countryState, searchTxt,translator)//
+            CameraBtn(disableBtn, searchTxt,imgUri, isSearch, contxt)
+            SelectTranslation(dataStore, languageSetting, cityState, countryState, searchTxt,translator)//
             IconButton(modifier = modifier
                 .offset(y = (screenH / 9))
                 .size(60.dp),
@@ -482,7 +556,7 @@ fun UserLocaleTxt(cityState: MutableState<String>, countryState: MutableState<St
 
 @Composable
 
-fun CameraBtn(searchTxt: MutableState<String>,imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>,contxt: Context,modifier: Modifier = Modifier){
+fun CameraBtn(disableBtn: MutableState<Boolean>, searchTxt: MutableState<String>,imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>,contxt: Context,modifier: Modifier = Modifier){
     val btnColor = ButtonDefaults.buttonColors(Color(0,179,219,255))
     val btnElevation = ButtonDefaults.buttonElevation(defaultElevation = 7.dp)
     //val uri = Uri.EMPTY
@@ -496,9 +570,9 @@ fun CameraBtn(searchTxt: MutableState<String>,imgUri: MutableState<Uri>, isSearc
          })
     Column{
         Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-            ElevatedButton(onClick = {
+            ElevatedButton(enabled = !(disableBtn.value), onClick = {
                 camLauncher.launch(uri)
-            }, modifier.size(200.dp),shape = RoundedCornerShape(50.dp), colors = btnColor, elevation = btnElevation) {
+            }, modifier = modifier.size(200.dp),shape = RoundedCornerShape(50.dp), colors = btnColor, elevation = btnElevation) {
                 Icon(
                     imageVector = Icons.Default.PhotoCamera,
                     contentDescription = "camera_btn",
@@ -509,6 +583,7 @@ fun CameraBtn(searchTxt: MutableState<String>,imgUri: MutableState<Uri>, isSearc
             }
         }
         Row{
+
             Text(text=searchTxt.value,fontSize = 25.sp, fontWeight = FontWeight.Bold, modifier = modifier.fillMaxWidth(), textAlign = TextAlign.Center)
         }
 
@@ -516,7 +591,10 @@ fun CameraBtn(searchTxt: MutableState<String>,imgUri: MutableState<Uri>, isSearc
 
 }//
 @Composable
-fun SelectTranslation(languageSetting: MutableState<String>, cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, translator: Translator, modifier: Modifier = Modifier){
+fun SelectTranslation(dataStore: StoreLanguageSetting, languageSetting: MutableState<String>, cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, translator: Translator, modifier: Modifier = Modifier){
+
+    val scope = rememberCoroutineScope()
+
     var expandState by remember { mutableStateOf(false) }
     val language = when (languageSetting.value) {
         "korean" -> "한국어"
@@ -534,7 +612,7 @@ fun SelectTranslation(languageSetting: MutableState<String>, cityState: MutableS
             .width(150.dp)
             .offset(y = 15.dp)
             .border(2.dp, LocalContentColor.current, RectangleShape)) {
-        Log.d("COLORRRRRRR", MaterialTheme.colorScheme.toString())
+
         Icon(imageVector = Icons.Default.Translate, contentDescription = "translate")
         Text(text = "  $language  ")
         Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "open_menu")
@@ -544,18 +622,25 @@ fun SelectTranslation(languageSetting: MutableState<String>, cityState: MutableS
             DropdownMenuItem(text = { Text("한국어") },
                 onClick = {
                     languageSetting.value = "korean"
-                    translator.translate(cityState.value).addOnSuccessListener { cityState.value = it }
-                    translator.translate(countryState.value).addOnSuccessListener { countryState.value = it }
+                    translator.translate(cityState.value).addOnSuccessListener { cityState.value = it }//mlkit 번역으로 도시 이름을 한국어로 번역
+                    translator.translate(countryState.value).addOnSuccessListener { countryState.value = it }//mlkit 번역으로 나라 이름을 한국어로 번역
                     searchTxt.value = "장소 검색"
+                    scope.launch {
+                        dataStore.updateLanguageSetting(languageSetting.value)//dataStore에 있는 언어 설정 값을 한국어로 변경
+                    }
                     expandState = false
             })
             DropdownMenuItem(text = { Text("English") },
                 onClick = {
                     languageSetting.value = "english"
-                    korEngTranslator.translate(cityState.value).addOnSuccessListener { cityState.value = it }
-                    korEngTranslator.translate(countryState.value).addOnSuccessListener { countryState.value = it }
+                    korEngTranslator.translate(cityState.value).addOnSuccessListener { cityState.value = it }//mlkit 번역으로 도시 이름을 영어로 번역
+                    korEngTranslator.translate(countryState.value).addOnSuccessListener { countryState.value = it }//mlkit 번역으로 나라 이름을 영어로 번역
                     searchTxt.value = "Search Place"
-                    expandState = false })
+                    scope.launch {
+                        dataStore.updateLanguageSetting(languageSetting.value)//dataStore에 있는 언어 설정 값을 영어로 변경
+                    }
+                    expandState = false
+                })
         }
     }
 }
@@ -627,13 +712,17 @@ private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorValue: Mutabl
                     titleTxt = "검색 결과 없음"
                     errorTxt = "검색된 장소가 없습니다."
                 }
+                "CONNECTION_LOST" -> {
+                    titleTxt = "네트워크 없음"
+                    errorTxt = "네트워크에 연결할 수\n 없습니다.\n 데이터 연결 확인 후\n 재시도 해주세요."
+                }
                 "VISION_ERR" -> {
                     titleTxt = "장소 검색 오류"
                     errorTxt = "사진 검색 AI에서\n오류가 발생했습니다."
                 }
                 "MAP_ERR" -> {
                     titleTxt = "지도 오류"
-                    errorTxt = "지도를 표현하던 중\n 오류가 발생했습니다."
+                    errorTxt = "지도를 표현하던 중\n오류가 발생했습니다."
                 }
                 "GEMINI_ERR" -> {
                     titleTxt = "장소 정보 오류"
@@ -646,6 +735,10 @@ private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorValue: Mutabl
                 "NOT_FOUND" -> {
                     titleTxt = "No Search Result"
                     errorTxt = "Can't find landmark\nfrom the picture"
+                }
+                "CONNECTION_LOST" -> {
+                    titleTxt = "Network Lost"
+                    errorTxt = "Can't connect to network.\n Please check network settings."
                 }
                 "VISION_ERR" -> {
                     titleTxt = "Place Search Error"
@@ -668,7 +761,7 @@ private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorValue: Mutabl
             AlertDialog(
                 icon = {Icon(imageVector = Icons.Default.ErrorOutline, contentDescription = "ErrorDialog", tint = Color.Gray, modifier = modifier.size(40.dp))},
                 title = { Text(text = titleTxt, textAlign = TextAlign.Center) },
-                text = { Text(text = errorTxt, textAlign = TextAlign.Center, fontSize = 23.sp, lineHeight = 30.sp, letterSpacing = 1.sp) },
+                text = { Text(text = errorTxt, textAlign = TextAlign.Center, fontSize = 23.sp, lineHeight = 34.sp, letterSpacing = 1.sp) },
                 onDismissRequest = { errorOccurred.value = false },
                 confirmButton = {
                     TextButton(onClick = { errorOccurred.value = false }) {

@@ -17,7 +17,7 @@ android {
         manifestPlaceholders += mapOf()
         applicationId = "com.dongjin.traveleye"
         minSdk = 31
-        targetSdk = 33
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 
@@ -29,14 +29,12 @@ android {
         properties.load(FileInputStream(rootProject.file("local.properties")))
         buildConfigField("String","MAPS_API_KEY",properties.getProperty("MAPS_API_KEY"))
         buildConfigField("String","MAP_ID",properties.getProperty("MAP_ID"))
-        buildConfigField("String","GEMINI_API_KEY",properties.getProperty("GEMINI_API_KEY"))
         buildFeatures{
             buildConfig = true
             viewBinding = true
         }
         manifestPlaceholders["MAPS_API_KEY"] = properties.getProperty("MAPS_API_KEY")
         manifestPlaceholders["MAP_ID"] = properties.getProperty("MAP_ID")
-        manifestPlaceholders["GEMINI_API_KEY"] = properties.getProperty("GEMINI_API_KEY")
     }
 
     buildTypes {
@@ -71,7 +69,7 @@ android {
 
 dependencies {
 
-    implementation("androidx.core:core-ktx:1.13.0")
+    implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation(platform("androidx.compose:compose-bom:2023.03.00"))
@@ -79,12 +77,12 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material:1.6.6")
-    implementation("androidx.compose.material:material-icons-extended:1.6.6")
+    implementation("androidx.compose.material:material:1.6.7")
+    implementation("androidx.compose.material:material-icons-extended:1.6.7")
     implementation(platform("com.google.firebase:firebase-bom:32.3.1"))
     implementation("com.google.firebase:firebase-auth-ktx")
-    implementation("com.google.firebase:firebase-functions:20.4.0")
-    implementation("com.google.code.gson:gson:2.8.9")
+    implementation("com.google.firebase:firebase-functions:21.0.0")
+    implementation("com.google.code.gson:gson:2.10.1")
     implementation(platform("androidx.compose:compose-bom:2023.03.00"))
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     implementation("com.google.android.gms:play-services-location:21.2.0")
@@ -92,10 +90,12 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation(platform("androidx.compose:compose-bom:2023.03.00"))
-    implementation("com.google.ai.client.generativeai:generativeai:0.4.0")
+    implementation("com.google.ai.client.generativeai:generativeai:0.5.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("com.google.mlkit:translate:17.0.2")
     implementation("com.google.mlkit:common:18.10.0")
+    implementation ("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("com.google.firebase:firebase-firestore:25.0.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")

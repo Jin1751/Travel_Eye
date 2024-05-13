@@ -1,6 +1,9 @@
 package com.dongjin.traveleye
 
+import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -41,7 +44,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -52,18 +54,15 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dongjin.traveleye.ui.theme.TravelEyeTheme
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.BlockThreshold
-import com.google.ai.client.generativeai.type.GenerateContentResponse
-import com.google.ai.client.generativeai.type.HarmCategory
-import com.google.ai.client.generativeai.type.SafetySetting
-//import com.google.ai.client.generativeai.type.generationConfig
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.launch
+import com.google.firebase.Firebase
+import com.google.firebase.firestore.firestore
 
 class ExplainLandMark : ComponentActivity() {
+
+    private lateinit var connectionManager: ConnectivityManager
+    private lateinit var networkCallback : ConnectivityManager.NetworkCallback
+    private lateinit var errorIntent : Intent
+
     private lateinit var landmarkIntent : Intent
     private var landmarkName = ""
     private var translatedName = ""
@@ -71,25 +70,29 @@ class ExplainLandMark : ComponentActivity() {
     private var showProgress = mutableStateOf(true)
     private lateinit var languageSetting : String
     private val openDialog = mutableStateOf(false)
-    private lateinit var response : GenerateContentResponse
+    private var state = mutableStateOf("none")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d("EXPLAINLANDMARK", "ONCREATE")
+        errorIntent = Intent(this, MainActivity::class.java)
+        networkCallback = object : ConnectivityManager.NetworkCallback(){
+            override fun onLost(network: Network) {//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
+                super.onLost(network)
+                backToMainActivity(true,"CONNECTION_LOST")
+            }
+        }
+        connectionManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        connectionManager.registerDefaultNetworkCallback(networkCallback)
+        when (connectionManager.activeNetwork){//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
+            null -> backToMainActivity(true,"CONNECTION_LOST")
+        }
+
         landmarkIntent = intent
         landmarkName = landmarkIntent.getStringExtra("LandmarkName")!!
         translatedName = landmarkIntent.getStringExtra("TranslatedName")!!
         languageSetting = landmarkIntent.getStringExtra("languageSetting")!!
-        val aiScope = CoroutineScope(Dispatchers.Main)//Gemini 사용을 위한 코루틴 스코프
-        if (description.value == ""){
-            aiScope.launch {//코루틴 실행
-                val task = async (Dispatchers.Main) {
-                    response =  askGemini(landmarkName)//Gemini에게 장소에 대한 설명 요청
-                }
-                task.await()//Gemini Response를 받을 때까지 wait
-                description.value = response.text!!
-                if (task.isCompleted) { showProgress.value = false}
-                Log.d("GEMINI RESPONSE", response.text.toString())
-            }
-        }
+
+
 
         setContent {
             TravelEyeTheme {
@@ -100,29 +103,101 @@ class ExplainLandMark : ComponentActivity() {
                 ) {
                     LandmarkDescription(landmarkName, translatedName, description, openDialog)
                     circularProgress(showProgress = showProgress)//Gemini Response가 오기 전까지 원형 프로그래스바 실행
-                    aiDialog(openDialog = openDialog, languageSetting = languageSetting)
+                    aiDialog(openDialog = openDialog, languageSetting = languageSetting)//ai로 만들어진 설명이라는 다이얼로그
                 }
             }
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+
+        if (state.value == "none"){
+            showProgress.value = true
+            useGemini(landmarkName, languageSetting)//firebase gemini에 설명 요청
+        }
+    }
+
+
     override fun onDestroy() {
         super.onDestroy()
+        state.value = "none"
         description.value = ""
     }
 
-    private suspend fun askGemini(landmarkName: String): GenerateContentResponse {
-        val harassmentSafety = SafetySetting(HarmCategory.HARASSMENT, BlockThreshold.ONLY_HIGH)
-        val hateSpeechSafety =
-            SafetySetting(HarmCategory.HATE_SPEECH, BlockThreshold.MEDIUM_AND_ABOVE)//Gemini Response 안전 규칙 설정
-        //val config = generationConfig { }
-        val model = GenerativeModel(
-            modelName = "gemini-pro",
-            apiKey = BuildConfig.GEMINI_API_KEY,
-            safetySettings = listOf(harassmentSafety, hateSpeechSafety)
-        )//Gemini 응답 모델 설정
-        val prompt = "Explain about $landmarkName in $languageSetting"//Gemini에게 요청할 문장
-        return model.generateContent(prompt)//Gemini Response를 받아 리턴
+    private fun backToMainActivity(isError : Boolean, errorMsg : String){
+        onDestroy()
+        finish()
+        errorIntent.putExtra("isError", isError)
+        errorIntent.putExtra("errorMsg", errorMsg)
+        startActivity(errorIntent)
+    }
+
+    //private suspend fun askGemini(landmarkName: String): GenerateContentResponse {//안드로이드 sdk에서 바로 gemini를 사용하는 함수, Google의 방침에 따라 사용하지 않음
+    //    val model = GenerativeModel(
+    //        "gemini-1.0-pro",
+    //        //gemini api key here,
+    //        generationConfig = generationConfig {
+    //            temperature = 0.9f
+    //            topK = 0
+    //            topP = 1f
+    //            maxOutputTokens = 2048
+    //        },
+    //        safetySettings = listOf(
+    //            SafetySetting(HarmCategory.HARASSMENT, BlockThreshold.ONLY_HIGH),
+    //            SafetySetting(HarmCategory.HATE_SPEECH, BlockThreshold.ONLY_HIGH),
+    //            SafetySetting(HarmCategory.SEXUALLY_EXPLICIT, BlockThreshold.ONLY_HIGH),
+    //            SafetySetting(HarmCategory.DANGEROUS_CONTENT, BlockThreshold.ONLY_HIGH),
+    //        ),
+    //    )
+//
+    //    val prompt = "ASK TO GEMINI"
+//
+    //    return model.generateContent(prompt)//Gemini Response를 받아 리턴
+    //}
+
+
+    private fun useGemini(landmarkName: String, languageSetting: String){
+        val firestore = Firebase.firestore//firebase에서 gemini extension이 참조하는 firestore
+        val collectionValue = hashMapOf(//firebase의 gemini extension의 prompt에 들어갈 값들을 collection에 삽입
+            "landmark" to landmarkName,
+            "language" to languageSetting
+        )
+        firestore.collection("generate").document("geminidoc").set(collectionValue).addOnSuccessListener {
+            Log.d("FIREBASE COLLECTION WRITE", "SUCCESSED")//collection 수정 완료
+        }.addOnFailureListener {
+            Log.d("FIREBASE COLLECTION WRITE", "FAILED $it")//collection 수정 실패
+            backToMainActivity(true, "GEMINI_ERR")//error 발생으로 MainActivity로 전환
+        }
+        val response = firestore.collection("generate").document("geminidoc")//gemini의 설명과 상태를 가진 firestore 문서
+
+        response.addSnapshotListener{//firestore 문서의 변화가 생기면 반응할 리스너 설정
+            snapshot, e ->
+            if (e != null) {//gemini exception발생으로 MainActivity로 전환
+                Log.d("FIREBASE GEMINI ", "Listen failed.", e)
+                showProgress.value = false
+                backToMainActivity(true, "GEMINI_ERR")
+                return@addSnapshotListener
+            }
+            if (snapshot != null && snapshot.exists()) {//정상적으로 gemini 설명을 받았을 때
+                val geminiData = snapshot.get("description").toString()//문서에서 description 부분을 저장
+                val status = snapshot["status"].toString().split("=")//문서의 status 부분을 '='로 나눠서 리스트로 저장 (status 중 state 값만 사용하기 위함, 특정 값만 받아오는 함수가 없음)
+                state.value = status[status.size - 1]//status 중 가장 마지막에 있는 state를 저장
+                if ((state.value == "COMPLETED}") or (state.value == "ERRORED}")){//gemini 응답 상태가 completed나 errored일때만 작동
+                    description.value = geminiData//gemini에게 받은 설명 출력
+                    showProgress.value = false//원형 프로그래스바 중지
+                    if (state.value == "ERRORED}"){//gemini에서 error 발생시 MainActivity로 전환
+                        backToMainActivity(true, "GEMINI_ERR")
+                    }
+                }
+                else{//gemini가 작업 중일땐 원형 프로그래스바 표현
+                    showProgress.value = true
+                }
+            } else {//gemini 설명이 없을 때 에러로 인한 MainActivity 복귀
+                showProgress.value = false
+                backToMainActivity(true, "GEMINI_ERR")
+            }
+        }
     }
 }
 
