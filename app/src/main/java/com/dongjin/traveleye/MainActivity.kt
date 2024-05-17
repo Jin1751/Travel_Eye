@@ -145,7 +145,7 @@ open class MainActivity : ComponentActivity() {
     private val openDialog = mutableStateOf(false)
 
     private val errorOccurred = mutableStateOf(false)
-    private val errorState = mutableStateOf("CONNECTION_LOST")
+    private val errorState = mutableStateOf("UNKNOWN")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         userLocation = Location(LOCATION_SERVICE)
@@ -242,7 +242,7 @@ open class MainActivity : ComponentActivity() {
                     MainActivity(dataStore, city, country, searchTxt, disableBtn, imgUri, isSearchImg, languageSetting, engKorTranslator, openDialog)
                     CircularProgressBar(showProgress = showProgress)
                     AIDialog(openDialog = openDialog, languageSetting = languageSetting)
-                    ErrorDialog(errorOccurred = errorOccurred, errorValue = errorState, languageSetting = languageSetting)
+                    ErrorDialog(errorOccurred = errorOccurred, errorState = errorState, languageSetting = languageSetting)
                 }
             }
         }
@@ -769,13 +769,13 @@ private fun AIDialog(openDialog : MutableState<Boolean>, languageSetting: Mutabl
 }
 
 @Composable
-private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorValue: MutableState<String>, languageSetting: MutableState<String>, modifier: Modifier = Modifier){
+private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorState: MutableState<String>, languageSetting: MutableState<String>, modifier: Modifier = Modifier){
     var titleTxt = ""
     var errorTxt = ""
 
     when (languageSetting.value){
         "korean" -> {
-            when (errorValue.value){
+            when (errorState.value){
                 "NOT_FOUND" -> {
                     titleTxt = "검색 결과 없음"
                     errorTxt = "검색된 장소가 없습니다."
@@ -796,10 +796,14 @@ private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorValue: Mutabl
                     titleTxt = "장소 정보 오류"
                     errorTxt = "장소 정보 AI에서\n오류가 발생했습니다."
                 }
+                "UNKNOWN" ->{
+                    titleTxt = "알 수 없는 오류"
+                    errorTxt = "알 수 없는\n오류가 발생했습니다."
+                }
             }
         }
         else -> {
-            when (errorValue.value){
+            when (errorState.value){
                 "NOT_FOUND" -> {
                     titleTxt = "No Search Result"
                     errorTxt = "Can't find landmark\nfrom the picture"
@@ -820,6 +824,10 @@ private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorValue: Mutabl
                     titleTxt = "Place Information Error"
                     errorTxt = "Error occurred from\nPlace Information AI"
                 }
+                "UNKNOWN" ->{
+                    titleTxt = "Unknown Error"
+                    errorTxt = "Unknown\nError Occurred."
+                }
             }
         }
     }
@@ -830,9 +838,14 @@ private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorValue: Mutabl
                 icon = {Icon(imageVector = Icons.Default.ErrorOutline, contentDescription = "ErrorDialog", tint = Color.Gray, modifier = modifier.size(40.dp))},
                 title = { Text(text = titleTxt, textAlign = TextAlign.Center) },
                 text = { Text(text = errorTxt, textAlign = TextAlign.Center, fontSize = 23.sp, lineHeight = 34.sp, letterSpacing = 1.sp) },
-                onDismissRequest = { errorOccurred.value = false },
+                onDismissRequest = {
+                    errorOccurred.value = false
+                    errorState.value = "" },
                 confirmButton = {
-                    TextButton(onClick = { errorOccurred.value = false }) {
+                    TextButton(onClick = {
+                        errorOccurred.value = false
+                        errorState.value = "UNKNOWN"
+                    }) {
                         Text(text = "OKAY", fontSize = 25.sp)
                     }
                 })
