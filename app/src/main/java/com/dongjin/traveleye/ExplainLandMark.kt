@@ -64,6 +64,8 @@ class ExplainLandMark : ComponentActivity() {
     private lateinit var errorIntent : Intent
 
     private lateinit var landmarkIntent : Intent
+    private lateinit var userCountry : String
+    private lateinit var userCity : String
     private var landmarkName = ""
     private var translatedName = ""
     private var description = mutableStateOf("")
@@ -78,16 +80,21 @@ class ExplainLandMark : ComponentActivity() {
         networkCallback = object : ConnectivityManager.NetworkCallback(){
             override fun onLost(network: Network) {//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
                 super.onLost(network)
-                backToMainActivity(true,"CONNECTION_LOST")
+                backToMainActivity("CONNECTION_LOST")
             }
         }
         connectionManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         connectionManager.registerDefaultNetworkCallback(networkCallback)
         when (connectionManager.activeNetwork){//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
-            null -> backToMainActivity(true,"CONNECTION_LOST")
+            null -> backToMainActivity("CONNECTION_LOST")
         }
 
         landmarkIntent = intent
+        userCountry = landmarkIntent.getStringExtra("country")!!
+        userCity = landmarkIntent.getStringExtra("city")!!
+        if (userCity == ""){
+            userCity = userCountry
+        }
         landmarkName = landmarkIntent.getStringExtra("LandmarkName")!!
         translatedName = landmarkIntent.getStringExtra("TranslatedName")!!
         languageSetting = landmarkIntent.getStringExtra("languageSetting")!!
@@ -102,8 +109,8 @@ class ExplainLandMark : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     LandmarkDescription(landmarkName, translatedName, description, openDialog)
-                    circularProgress(showProgress = showProgress)//Gemini Response가 오기 전까지 원형 프로그래스바 실행
-                    aiDialog(openDialog = openDialog, languageSetting = languageSetting)//ai로 만들어진 설명이라는 다이얼로그
+                    CircularProgress(showProgress = showProgress)//Gemini Response가 오기 전까지 원형 프로그래스바 실행
+                    AiDialog(openDialog = openDialog, languageSetting = languageSetting)//ai로 만들어진 설명이라는 다이얼로그
                 }
             }
         }
@@ -125,10 +132,10 @@ class ExplainLandMark : ComponentActivity() {
         description.value = ""
     }
 
-    private fun backToMainActivity(isError : Boolean, errorMsg : String){
+    private fun backToMainActivity(errorMsg : String){
         onDestroy()
         finish()
-        errorIntent.putExtra("isError", isError)
+        errorIntent.putExtra("isError", true)
         errorIntent.putExtra("errorMsg", errorMsg)
         startActivity(errorIntent)
     }
@@ -160,14 +167,17 @@ class ExplainLandMark : ComponentActivity() {
     private fun useGemini(landmarkName: String, languageSetting: String){
         val firestore = Firebase.firestore//firebase에서 gemini extension이 참조하는 firestore
         val collectionValue = hashMapOf(//firebase의 gemini extension의 prompt에 들어갈 값들을 collection에 삽입
+            "language" to languageSetting ,
             "landmark" to landmarkName,
-            "language" to languageSetting
+            "city" to userCity,
+            "country" to userCountry,
+
         )
         firestore.collection("generate").document("geminidoc").set(collectionValue).addOnSuccessListener {
             Log.d("FIREBASE COLLECTION WRITE", "SUCCESSED")//collection 수정 완료
         }.addOnFailureListener {
             Log.d("FIREBASE COLLECTION WRITE", "FAILED $it")//collection 수정 실패
-            backToMainActivity(true, "GEMINI_ERR")//error 발생으로 MainActivity로 전환
+            backToMainActivity("GEMINI_ERR")//error 발생으로 MainActivity로 전환
         }
         val response = firestore.collection("generate").document("geminidoc")//gemini의 설명과 상태를 가진 firestore 문서
 
@@ -176,18 +186,25 @@ class ExplainLandMark : ComponentActivity() {
             if (e != null) {//gemini exception발생으로 MainActivity로 전환
                 Log.d("FIREBASE GEMINI ", "Listen failed.", e)
                 showProgress.value = false
-                backToMainActivity(true, "GEMINI_ERR")
+                backToMainActivity("GEMINI_ERR")
                 return@addSnapshotListener
             }
             if (snapshot != null && snapshot.exists()) {//정상적으로 gemini 설명을 받았을 때
                 val geminiData = snapshot.get("description").toString()//문서에서 description 부분을 저장
+
                 val status = snapshot["status"].toString().split("=")//문서의 status 부분을 '='로 나눠서 리스트로 저장 (status 중 state 값만 사용하기 위함, 특정 값만 받아오는 함수가 없음)
-                state.value = status[status.size - 1]//status 중 가장 마지막에 있는 state를 저장
-                if ((state.value == "COMPLETED}") or (state.value == "ERRORED}")){//gemini 응답 상태가 completed나 errored일때만 작동
+                state.value = status[status.size - 1]//status 중 가장 마지막에 있는 state를 저장 (PROCESSING, COMPLETED)
+                var errorCheck = false
+                status.forEach {
+                    if (it == "ERRORED, error") {// error 체크, error는 에러 설명이 리스트 맨 뒤에 나와서 다른 상태처럼 체크가 불가능
+                        errorCheck = true
+                    }
+                }
+                if ((state.value == "COMPLETED}") or (errorCheck)){//gemini 응답 상태가 completed나 errored일때만 작동
                     description.value = geminiData//gemini에게 받은 설명 출력
                     showProgress.value = false//원형 프로그래스바 중지
-                    if (state.value == "ERRORED}"){//gemini에서 error 발생시 MainActivity로 전환
-                        backToMainActivity(true, "GEMINI_ERR")
+                    if (errorCheck){//gemini에서 error 발생시 MainActivity로 전환
+                        backToMainActivity("GEMINI_ERR")
                     }
                 }
                 else{//gemini가 작업 중일땐 원형 프로그래스바 표현
@@ -195,7 +212,7 @@ class ExplainLandMark : ComponentActivity() {
                 }
             } else {//gemini 설명이 없을 때 에러로 인한 MainActivity 복귀
                 showProgress.value = false
-                backToMainActivity(true, "GEMINI_ERR")
+                backToMainActivity("GEMINI_ERR")
             }
         }
     }
@@ -276,7 +293,7 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
 
 }
 @Composable
-private fun aiDialog(openDialog : MutableState<Boolean>, languageSetting : String,modifier: Modifier = Modifier){
+private fun AiDialog(openDialog : MutableState<Boolean>, languageSetting : String,modifier: Modifier = Modifier){
     val dialogTxt = when(languageSetting)  {
         "korean" -> "본 앱은 AI 기술을 활용하므로\n정보 오류 가능성이 있습니다.\n 장소 정보는 참고용으로만 \n사용하시길 권장합니다."
 
@@ -299,18 +316,15 @@ private fun aiDialog(openDialog : MutableState<Boolean>, languageSetting : Strin
 
 
 @Composable
-private fun circularProgress(showProgress : MutableState<Boolean>, modifier: Modifier = Modifier) {
-    val loading by remember { showProgress }
+private fun CircularProgress(showProgress : MutableState<Boolean>, modifier: Modifier = Modifier) {
+    val loading by remember { showProgress }//mutableStateOf(true)
 
     if (!loading) return
 
-    val config = LocalConfiguration.current
-    val screenH = config.screenHeightDp.dp
-    val screenW = config.screenWidthDp.dp
     Column (modifier = modifier.fillMaxSize()) {
-        Spacer(modifier = modifier.height((screenH / 2) - 75.dp))
+        Spacer(modifier = modifier.fillMaxHeight(0.5f))
         Row (modifier = modifier.fillMaxSize()) {
-            Spacer(modifier = modifier.width((screenW / 2) - 33.5.dp))
+            Spacer(modifier = modifier.fillMaxWidth(0.42f))
             CircularProgressIndicator(
                 modifier = Modifier.width(61.5.dp),
                 color = Color.Cyan,
@@ -328,6 +342,7 @@ fun GreetingPreview2() {
     val di = mutableStateOf(false)
     TravelEyeTheme (darkTheme = true) {
         LandmarkDescription("Android","HELLO WORLD",ts,di)
-        aiDialog(openDialog = di, "english")
+        CircularProgress(showProgress = mutableStateOf(true))//Gemini Response가 오기 전까지 원형 프로그래스바 실행
+        AiDialog(openDialog = di, "english")
     }
 }

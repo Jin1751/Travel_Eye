@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.location.Geocoder
 import android.location.Geocoder.GeocodeListener
 import android.location.LocationListener
@@ -30,12 +30,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -75,6 +74,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
@@ -120,8 +120,10 @@ open class MainActivity : ComponentActivity() {
     private lateinit var fusedLocationClient : FusedLocationProviderClient
     private lateinit var userLocation : Location
 
-    private var country = mutableStateOf("나라")
-    private var city = mutableStateOf("도시")
+    private var country = mutableStateOf("Country")
+    private var city = mutableStateOf("")
+    private var engCountry = "Country"//intent로 Gemini에게 보낼 영어 국가이름
+    private var engCity = ""//intent로 Gemini에게 보낼 영어 도시이름
 
     private var disableBtn = mutableStateOf(false)
     private var searchTxt = mutableStateOf("장소 검색")
@@ -146,6 +148,26 @@ open class MainActivity : ComponentActivity() {
     private val errorState = mutableStateOf("CONNECTION_LOST")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        userLocation = Location(LOCATION_SERVICE)
+
+        checkPermissions()
+        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager//위치 정보 접근 오브젝트 생성
+        locationListener = LocationListener { location ->
+            userLocation = location
+            getAddress()
+
+        }// 위치 정보가 바뀌었을때 반응할 리스너 오브젝트
+        startLocationUpdate()
+        getAddress()
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        try{//앱 시작시 바로 검색을 하면 에러가 발생해 가장 최근에 알려진 장소를 먼저 사용자 위치로 설정, 위치 권한 설정이 안 돼있을 수 있어 try-catch로 작성함
+            fusedLocationClient.lastLocation.addOnSuccessListener {
+                    userLocation = it//fusedLocation은 여러 위치 제공자를 융합해 정확한 최신 위치 정보를 제공하지만 배터리 소모가 큼, 앱이 실행됐을때 맨 처음 위치를 잡아야해서 fusedLocation을 사용했음, 이후엔 리소스 절약을 위해 LocationManager사용
+                    getAddress()
+            }
+        }catch (_: SecurityException){
+            checkPermissions()
+        }
 
         dataStore = StoreLanguageSetting(this)
         runBlocking {
@@ -196,7 +218,7 @@ open class MainActivity : ComponentActivity() {
                     updateUI(user)
                 } else {// 로그인 실패시
                     // If sign in fails, display a message to the user.
-                    Log.w("Firebase Auth", "signInAnonymously:failure", task.exception)
+                    Log.d("Firebase Auth", "signInAnonymously:failure", task.exception)
                     Toast.makeText(baseContext,"Authentication failed.",Toast.LENGTH_SHORT).show()
                     updateUI(null)
                 }
@@ -206,23 +228,6 @@ open class MainActivity : ComponentActivity() {
         engKorTranslator = Translation.getClient(langOptions)//mlkit 번역기 생성
         translatorCondition = DownloadConditions.Builder().requireWifi().build()// 번역 언어 다운로드 상태 체크 오브젝트
         engKorTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Toast.makeText(this,"번역 언어 다운로드 오류",Toast.LENGTH_LONG).show() }//번역 언어 다운로드
-
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        try{//앱 시작시 바로 검색을 하면 에러가 발생해 가장 최근에 알려진 장소를 먼저 사용자 위치로 설정, 위치 권한 설정이 안 돼있을 수 있어 try-catch로 작성함
-            fusedLocationClient.lastLocation.addOnSuccessListener {
-                userLocation = it//fusedLocation은 여러 위치 제공자를 융합해 정확한 최신 위치 정보를 제공하지만 배터리 소모가 큼, 앱이 실행됐을때 맨 처음 위치를 잡아야해서 fusedLocation을 사용했음, 이후엔 리소스 절약을 위해 LocationManager사용
-                getAddress()
-            }
-        }catch (_: SecurityException){
-            checkPermissions()
-        }
-
-        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager//위치 정보 접근 오브젝트 생성
-        locationListener = LocationListener { location ->
-            userLocation = location
-            getAddress()
-        }// 위치 정보가 바뀌었을때 반응할 리스너 오브젝트
-
 
 
         setContent {
@@ -245,7 +250,6 @@ open class MainActivity : ComponentActivity() {
 
     override fun onRestart() {
         super.onRestart()
-
         Log.d("onRestart", "onRestart")
     }
 
@@ -267,15 +271,16 @@ open class MainActivity : ComponentActivity() {
         super.onResume()
 
         Log.d("onResume", "onResume")
-        if (isSearchImg.value){//이전 액티비티가 카메라 촬영 액티비티였다면 CLoud Vision API 검색 작업 실행
+        if (isSearchImg.value){//이전 액티비티가 카메라 촬영 액티비티였다면 Cloud Vision API 검색 작업 실행
             showProgress.value = true
             searchTxt.value = when(languageSetting.value){
                 "korean" -> " 검색중..."
                 "english" -> "Searching..."
-                else -> " 검색중..."
+                else -> " Searching..."
             }
             val inputStream = contentResolver.openInputStream(imgUri.value)
-            bitmapImg.value = BitmapFactory.decodeStream(inputStream)//Cloud Vision API에 보낼 이미지를 Uri에서 비트맵으로 변환
+            bitmapImg.value = ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, imgUri.value))//Cloud Vision API에 보낼 이미지를 Uri에서 비트맵으로 변환
+            //bitmapImg.value = BitmapFactory.decodeStream(inputStream)//uri -> bitmap 과정에서 사용했더니 emulator에서는 작동했지만 실제 기기에선 cloud vision api가 작동하지 않았음, ImageDecoder를 사용하니 정상작동했음
             inputStream?.close()
             bitmapImg.value = scaleBitmap(bitmapImg.value)//Cloud Vision API에 보낼 이미지를 규격에 맞게 조절
             functions = Firebase.functions
@@ -289,8 +294,8 @@ open class MainActivity : ComponentActivity() {
             img.add("content", JsonPrimitive(base64encoded))//이미지 변환 64비트 문자열을 오브젝트에 입력
             request.add("image",img)//이미지 오브젝트를 request 오브젝트에 입력
             val feature = JsonObject()//Cloud Vision API에 request 보낼 나머지 세부사항을 담을 Json 오브젝트 1
-            feature.add("maxResults", JsonPrimitive(5))//최대 검색 결과를 5개로 설정
-            feature.add("type", JsonPrimitive("LANDMARK_DETECTION"))//Cloud Vision API의 검색 형식을 명소 검색으로 설정
+            feature.add("maxResults", JsonPrimitive(10))//최대 검색 결과를 5개로 설정FACE_DETECTION
+            feature.add("type", JsonPrimitive("LANDMARK_DETECTION"))//Cloud Vision API의 검색 형식을 명소 검색으로 설정LANDMARK_DETECTION
             val features = JsonArray()//Cloud Vision API에 request 보낼 나머지 세부사항을 담을 Json 오브젝트 2
             features.add(feature)// 세부사항을 적은 오브젝트1 를 오브젝트2에 입력
             request.add("features",features)//세부사항 오브젝트를 request 오브젝트에 입력
@@ -305,7 +310,7 @@ open class MainActivity : ComponentActivity() {
                     searchTxt.value = when(languageSetting.value){
                         "korean" -> "장소 검색"
                         "english" -> "Search Place"
-                        else -> "장소 검색"
+                        else -> "Search Place"
                     }
                     if (e is FirebaseFunctionsException) {//통신은 됐으나 익셉션이 생겼을때
                         val code = e.code
@@ -315,7 +320,8 @@ open class MainActivity : ComponentActivity() {
                     }
                     if (task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray.size() == 0){//통신은 됐으나 장소를 찾지 못했을 경우
                         errorOccurred.value = true
-                        errorState.value = "NOT_FOUND" }
+                        errorState.value = "NOT_FOUND"
+                    }
                     else{//검색 결과가 있을 경우
                         var totalLandmark = 0
                         for (label in task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray) {// 검색 결과를 순서대로 출력
@@ -335,20 +341,27 @@ open class MainActivity : ComponentActivity() {
                                 val place = Location(LocationManager.GPS_PROVIDER)
                                 place.latitude = latitude.asDouble
                                 place.longitude = longitude.asDouble
-                                if (userLocation.distanceTo(place) < 5000){//사용자와 5km이내의 장소만 저장
+                                if (userLocation.distanceTo(place) < 10000){//사용자와 10km이내의 장소만 저장
                                     totalLandmark += 1
                                     Log.d("VISION $totalLandmark", "Distance: " + userLocation.distanceTo(place) + ", LANDMARK NAME: " + landmarkName)
                                     val landmark = NearLandmark(landmarkName, landmarkName, score, place)
                                     intent.putExtra("landMark$totalLandmark", landmark)
                                 }
-                                Log.d("VISION", "Distance: " + userLocation.distanceTo(place))
                             }
+                            Log.d("VISION SUCCESS", "total: $totalLandmark")
 
                         }
                         isSearchImg.value = false
-                        intent.putExtra("totalLandmark",totalLandmark)
-                        intent.putExtra("languageSetting", languageSetting.value)
-                        startActivity(intent)
+                        if (totalLandmark == 0){
+                            errorOccurred.value = true
+                            errorState.value = "NOT_FOUND"
+                        }else{
+                            intent.putExtra("country",engCountry)
+                            intent.putExtra("city",engCity)
+                            intent.putExtra("totalLandmark",totalLandmark)
+                            intent.putExtra("languageSetting", languageSetting.value)
+                            startActivity(intent)
+                        }
                     }
 
                 }
@@ -371,7 +384,7 @@ open class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         Log.d("onStop", "onStop")
-        //engKorTranslator.close()
+        //engKorTranslator.close() 닫으면 다시 돌아와서 언어설정을 바꿨을때 에러가 남
         stopLocationUpdate()
     }
 
@@ -389,14 +402,19 @@ open class MainActivity : ComponentActivity() {
             permissions.entries.forEach{(permission, isGranted) ->
                 when{
                     isGranted -> {
+                        if (permission == (Manifest.permission.ACCESS_FINE_LOCATION)){
+                            startLocationUpdate()
+                        }
                         try{
                             fusedLocationClient.lastLocation.addOnSuccessListener {
                                 userLocation = it
+                                getAddress()
                             }
                         }catch (_: SecurityException){
                         }
                     }
                     !isGranted -> {
+
                         if (permission == Manifest.permission.ACCESS_FINE_LOCATION){
                             shouldShowRequestPermissionRationale(permission)
                             Toast.makeText(this, "위치 권한을 허용해주세요", Toast.LENGTH_SHORT).show()
@@ -423,35 +441,54 @@ open class MainActivity : ComponentActivity() {
         if (ActivityCompat.checkSelfPermission(
                 this,
                 Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(
+            ) != PackageManager.PERMISSION_GRANTED || ActivityCompat.checkSelfPermission(
                 this,
                 Manifest.permission.ACCESS_COARSE_LOCATION
             ) != PackageManager.PERMISSION_GRANTED
         ) {
+            checkPermissions()
             return
         }
-        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5000,10f, locationListener, Looper.getMainLooper())
-
+        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000,10f, locationListener, Looper.getMainLooper())
     }//사용자의 위치좌표를 가져올 함수, 5분에 한번씩 가져온다
     private fun stopLocationUpdate(){
         locationManager.removeUpdates(locationListener)
     }//사용자의 위치 좌표를 호출을 중지하는 함수, 리소스 제어를 위해 사용
     private fun getAddress(){ // 사용자의 위치좌표를 가지고 해당 위치의 국가와 도시를 가져와 텍스트를 바꾸는 함수
-        val geocoder = Geocoder(this, Locale.getDefault())
+        val geocoder = Geocoder(this, Locale.ENGLISH)
+        Log.d("BUILD BUI", Build.VERSION.SDK_INT.toString())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU){ // API 33부턴 getFromLocation이 deprecated 돼 api 수준에 따라 분리함
             val geoListener = GeocodeListener {
                 addresses ->
+
                 if (languageSetting.value != "english") {//언어 설정이 영어가 아닌 경우 번역기로 나라, 도시 번역
                     engKorTranslator.translate(addresses[0].countryName).addOnSuccessListener {
                         country.value = it
+                        engCountry = addresses[0].countryName
                     }
-                    engKorTranslator.translate(addresses[0].adminArea).addOnSuccessListener {
-                        city.value = it
+                    if (addresses[0].adminArea != null){
+                        engKorTranslator.translate(addresses[0].adminArea).addOnSuccessListener {
+                            city.value = it
+                            engCity = addresses[0].adminArea
+                        }
                     }
+                    else{
+                        city.value = ""
+                        engCity = ""
+                    }
+                    Log.d("USER city", city.value)
                 }
                 else{
                     country.value = addresses[0].countryName
-                    city.value = addresses[0].adminArea
+                    engCountry = addresses[0].countryName
+                    if (addresses[0].adminArea != null){
+                        city.value = addresses[0].adminArea
+                        engCity = addresses[0].adminArea
+                    }
+                    else{
+                        city.value = ""
+                        engCity = ""
+                    }
                 }
 
             }
@@ -465,14 +502,30 @@ open class MainActivity : ComponentActivity() {
                     if (languageSetting.value != "english"){//언어 설정이 영어가 아닌 경우 번역기로 나라, 도시 번역
                         engKorTranslator.translate(address.countryName).addOnSuccessListener {
                             country.value =  it
+                            engCountry = it
                         }
-                        engKorTranslator.translate(address.adminArea).addOnSuccessListener {
-                            city.value =  it
+                        if (address.adminArea != null){
+                            engKorTranslator.translate(address.adminArea).addOnSuccessListener {
+                                city.value = it
+                                engCity = it
+                            }
+                        }
+                        else{
+                            city.value = ""
+                            engCity = ""
                         }
                     }
-                    else{
+                    else{//You are a tourist guide. Create description or explanation about Gwanghwamun in seoul, south korea in korean. Add notification that your description might have wrong information
                         country.value = address.countryName
-                        city.value = address.adminArea
+                        engCountry = address.countryName
+                        if (address.adminArea != null){
+                            city.value = address.adminArea
+                            engCity = address.adminArea
+                        }
+                        else{
+                            city.value = ""
+                            engCity = ""
+                        }
                     }
                 }
             }
@@ -517,20 +570,29 @@ open class MainActivity : ComponentActivity() {
 fun MainActivity(dataStore: StoreLanguageSetting , cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, disableBtn : MutableState<Boolean>, imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>, languageSetting: MutableState<String>, translator: Translator, openDialog: MutableState<Boolean>, modifier: Modifier = Modifier) {
     val contxt = LocalContext.current
     val config = LocalConfiguration.current
-    val screenH = config.screenHeightDp.dp
+    val screenW = config.screenWidthDp.dp
+
+
     Column(modifier.fillMaxSize()) {
-        Spacer(modifier = modifier.height(20.dp))
-        UserLocaleTxt(cityState = cityState, countryState = countryState)
-        Column (modifier = modifier.offset(y = screenH/4), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            CameraBtn(disableBtn, searchTxt,imgUri, isSearch, contxt)
-            SelectTranslation(dataStore, languageSetting, cityState, countryState, searchTxt,translator)//
-            IconButton(modifier = modifier
-                .offset(y = (screenH / 9))
-                .size(60.dp),
-                onClick = {
-                    openDialog.value = true
-                }) {
-                Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AIDialog", tint = Color(38,124,240,255), modifier = modifier.size(40.dp))
+        Spacer(modifier = modifier.fillMaxHeight(0.02f))
+        UserLocaleTxt(screenW,cityState = cityState, countryState = countryState)
+        Spacer(modifier = modifier.fillMaxHeight(0.255f))
+        CameraBtn(disableBtn, searchTxt,imgUri, isSearch, contxt)
+        Row (modifier = modifier.fillMaxWidth() ,horizontalArrangement = Arrangement.Center){
+            //Spacer(modifier = modifier.width(screenW / 3))
+            SelectTranslation(dataStore, languageSetting, cityState, countryState, searchTxt,translator)
+        }
+        Column (verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(modifier = modifier.fillMaxHeight(0.35f))
+            Row (modifier = modifier.fillMaxWidth() ,horizontalArrangement = Arrangement.Center){
+                IconButton(modifier = modifier
+                    .fillMaxWidth(0.25f)
+                    .fillMaxHeight(0.25f),
+                    onClick = {
+                        openDialog.value = true
+                    }) {
+                    Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AIDialog", tint = Color(38,124,240,255), modifier = modifier.fillMaxSize())
+                }
             }
         }
 
@@ -539,14 +601,15 @@ fun MainActivity(dataStore: StoreLanguageSetting , cityState: MutableState<Strin
 }
 
 @Composable
-fun UserLocaleTxt(cityState: MutableState<String>, countryState: MutableState<String>, modifier: Modifier = Modifier){
+fun UserLocaleTxt(screenW: Dp ,cityState: MutableState<String>, countryState: MutableState<String>, modifier: Modifier = Modifier){
     Row{
-        Spacer(modifier = modifier.width(10.dp))
+        Spacer(modifier = modifier.fillMaxWidth(0.025f))
         Icon(imageVector = Icons.Filled.Place, contentDescription = "user_locale",
             modifier
-                .size(40.dp)
-                .offset(y = 10.dp), tint = LocalContentColor.current)
-        Column (modifier = modifier.offset(x = 5.dp)) {
+                .fillMaxHeight(0.05f)
+                .fillMaxWidth(0.1f)//.offset(y = screenH / 80)
+                , tint = LocalContentColor.current)
+        Column (modifier = modifier.offset(x = screenW / 82)) {
             Text(text = countryState.value, fontSize = 25.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(text = cityState.value, fontSize = 25.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)// 텍스트를 외부에서 바꾸기 위해선 mutableState의 Value를 외부에서 바꾸면, 컴포즈는 State를 받아 안에 있는 value를 받아 사용한다.
         }
@@ -568,24 +631,22 @@ fun CameraBtn(disableBtn: MutableState<Boolean>, searchTxt: MutableState<String>
                 isSearch.value = true
             }
          })
-    Column{
-        Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+    Column(verticalArrangement = Arrangement.Top, horizontalAlignment = Alignment.CenterHorizontally){
+        Row(modifier = modifier.fillMaxWidth(0.5f).fillMaxHeight(0.39f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             ElevatedButton(enabled = !(disableBtn.value), onClick = {
                 camLauncher.launch(uri)
-            }, modifier = modifier.size(200.dp),shape = RoundedCornerShape(50.dp), colors = btnColor, elevation = btnElevation) {
+            }, modifier = modifier.fillMaxSize(),shape = RoundedCornerShape(50.dp), colors = btnColor, elevation = btnElevation) {
                 Icon(
                     imageVector = Icons.Default.PhotoCamera,
                     contentDescription = "camera_btn",
-                    modifier = modifier.size(200.dp),
+                    modifier = modifier.fillMaxSize(),
                     tint = Color.Black
                 )
 
             }
         }
-        Row{
-
-            Text(text=searchTxt.value,fontSize = 25.sp, fontWeight = FontWeight.Bold, modifier = modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-        }
+        Spacer(modifier = modifier.fillMaxHeight(0.02f))
+        Text(text=searchTxt.value,fontSize = 25.sp, fontWeight = FontWeight.Bold, modifier = modifier.fillMaxWidth(), textAlign = TextAlign.Center)
 
     }
 
@@ -605,44 +666,47 @@ fun SelectTranslation(dataStore: StoreLanguageSetting, languageSetting: MutableS
     val korEngTranslator = Translation.getClient(langOptions)//mlkit 번역기 생성
     val translatorCondition = DownloadConditions.Builder().requireWifi().build()// 번역 언어 다운로드 상태 체크 오브젝트
     korEngTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Log.d("KOR2Eng", "Download Error") }//번역 언어 다운로드
-
-    TextButton(onClick = { expandState = true }, shape = RoundedCornerShape(5.dp),
-        colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current),
-        modifier = modifier
-            .width(150.dp)
-            .offset(y = 15.dp)
-            .border(2.dp, LocalContentColor.current, RectangleShape)) {
-
-        Icon(imageVector = Icons.Default.Translate, contentDescription = "translate")
-        Text(text = "  $language  ")
-        Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "open_menu")
-    }
-    Column (modifier.offset(x = (-50).dp,y=20.dp)) {
-        DropdownMenu(expanded = expandState, onDismissRequest = { expandState = false },modifier.wrapContentSize()) {
-            DropdownMenuItem(text = { Text("한국어") },
-                onClick = {
-                    languageSetting.value = "korean"
-                    translator.translate(cityState.value).addOnSuccessListener { cityState.value = it }//mlkit 번역으로 도시 이름을 한국어로 번역
-                    translator.translate(countryState.value).addOnSuccessListener { countryState.value = it }//mlkit 번역으로 나라 이름을 한국어로 번역
-                    searchTxt.value = "장소 검색"
-                    scope.launch {
-                        dataStore.updateLanguageSetting(languageSetting.value)//dataStore에 있는 언어 설정 값을 한국어로 변경
-                    }
-                    expandState = false
-            })
-            DropdownMenuItem(text = { Text("English") },
-                onClick = {
-                    languageSetting.value = "english"
-                    korEngTranslator.translate(cityState.value).addOnSuccessListener { cityState.value = it }//mlkit 번역으로 도시 이름을 영어로 번역
-                    korEngTranslator.translate(countryState.value).addOnSuccessListener { countryState.value = it }//mlkit 번역으로 나라 이름을 영어로 번역
-                    searchTxt.value = "Search Place"
-                    scope.launch {
-                        dataStore.updateLanguageSetting(languageSetting.value)//dataStore에 있는 언어 설정 값을 영어로 변경
-                    }
-                    expandState = false
-                })
+    Row (horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        Spacer(modifier = modifier.fillMaxHeight(0.25f))
+        Column {
+            TextButton(onClick = { expandState = true }, shape = RoundedCornerShape(5.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current),
+                modifier = modifier.fillMaxWidth(0.36f).border(2.dp, LocalContentColor.current, RectangleShape)) {
+                Icon(imageVector = Icons.Default.Translate, contentDescription = "translate")
+                Text(text = "  $language  ")
+                Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = "open_menu")
+            }
+            Column {
+                DropdownMenu(expanded = expandState, onDismissRequest = { expandState = false },
+                    modifier.wrapContentSize().fillMaxWidth(0.36f)) {
+                    DropdownMenuItem(text = { Text("한국어", textAlign = TextAlign.Center, modifier = modifier.fillMaxWidth()) },
+                        onClick = {
+                            languageSetting.value = "korean"
+                            translator.translate(cityState.value).addOnSuccessListener { cityState.value = it }//mlkit 번역으로 도시 이름을 한국어로 번역
+                            translator.translate(countryState.value).addOnSuccessListener { countryState.value = it }//mlkit 번역으로 나라 이름을 한국어로 번역
+                            searchTxt.value = "장소 검색"
+                            scope.launch {
+                                dataStore.updateLanguageSetting(languageSetting.value)//dataStore에 있는 언어 설정 값을 한국어로 변경
+                            }
+                            expandState = false
+                        })
+                    DropdownMenuItem(text = { Text("English", textAlign = TextAlign.Center, modifier = modifier.fillMaxWidth()) },
+                        onClick = {
+                            languageSetting.value = "english"
+                            korEngTranslator.translate(cityState.value).addOnSuccessListener { cityState.value = it }//mlkit 번역으로 도시 이름을 영어로 번역
+                            korEngTranslator.translate(countryState.value).addOnSuccessListener { countryState.value = it }//mlkit 번역으로 나라 이름을 영어로 번역
+                            searchTxt.value = "Search Place"
+                            scope.launch {
+                                dataStore.updateLanguageSetting(languageSetting.value)//dataStore에 있는 언어 설정 값을 영어로 변경
+                            }
+                            expandState = false
+                        })
+                }
+            }
         }
     }
+
+
 }
 
 fun Context.createTmpImageUri(
@@ -661,14 +725,18 @@ private fun CircularProgressBar(showProgress : MutableState<Boolean>, modifier: 
 
     if (!loading) return
 
-    Column (modifier = modifier
-        .fillMaxSize()
-        .offset(y = (-28).dp)) {
-        Row (modifier = modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+    Column (
+        modifier
+            .fillMaxWidth()
+            .fillMaxHeight(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally){
+        Row (modifier = modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.96f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center
+        ){
             CircularProgressIndicator(
-                modifier = Modifier.width(61.5.dp),
+                modifier = modifier.fillMaxSize(0.16f),
                 color = Color.Yellow,
-                strokeWidth = 10.7.dp,
+                strokeWidth = 10.5.dp,
             )
         }
     }
@@ -768,7 +836,6 @@ private fun ErrorDialog(errorOccurred: MutableState<Boolean>, errorValue: Mutabl
                         Text(text = "OKAY", fontSize = 25.sp)
                     }
                 })
-            Log.d("AI Error", "AI ERROR OCCURRED")
         }
     }
 }

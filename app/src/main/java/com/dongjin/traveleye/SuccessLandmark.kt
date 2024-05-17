@@ -79,6 +79,9 @@ class SuccessLandmark : ComponentActivity() {
     private lateinit var locationIntent : Intent
 
     private lateinit var userLocation :Location
+    private lateinit var userCountry : String
+    private lateinit var userCity : String
+
 
     private val landmarkArray : MutableList<NearLandmark> = mutableListOf()//랜드마크들을 저장할 리스트
 
@@ -94,16 +97,18 @@ class SuccessLandmark : ComponentActivity() {
         networkCallback = object : ConnectivityManager.NetworkCallback(){
             override fun onLost(network: Network) {//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
                 super.onLost(network)
-                backToMainActivity(true,"CONNECTION_LOST")
+                backToMainActivity()
             }
         }
         connectionManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         connectionManager.registerDefaultNetworkCallback(networkCallback)
         when (connectionManager.activeNetwork){//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
-            null -> backToMainActivity(true,"CONNECTION_LOST")
+            null -> backToMainActivity()
         }
 
         locationIntent = intent
+        userCountry = locationIntent.getStringExtra("country")!!
+        userCity = locationIntent.getStringExtra("city")!!
         userLocation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {//빌드 버전 33 이상 시 인텐트에서 사용자 위치 가져오는 작업
             locationIntent.getParcelableExtra("userLocation",Location::class.java)!!
         }else{//빌드 버전 33 미만시
@@ -122,7 +127,7 @@ class SuccessLandmark : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        LandMarkInfoMap(landmarkArray, userLocation, languageSetting, buttonTxt)
+                        LandMarkInfoMap(userCountry, userCity,landmarkArray, userLocation, languageSetting, buttonTxt)
                     }
                 }
 
@@ -155,11 +160,11 @@ class SuccessLandmark : ComponentActivity() {
 
     }
 
-    private fun backToMainActivity(isError : Boolean, errorMsg : String){
+    private fun backToMainActivity(){
         onDestroy()
         finish()
-        errorIntent.putExtra("isError", isError)
-        errorIntent.putExtra("errorMsg", errorMsg)
+        errorIntent.putExtra("isError", true)
+        errorIntent.putExtra("errorMsg", "CONNECTION_LOST")
         startActivity(errorIntent)
     }
 }
@@ -167,7 +172,7 @@ class SuccessLandmark : ComponentActivity() {
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
-fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Location, languageSetting : String, buttonTxt : Map<String, String>, modifier: Modifier = Modifier){
+fun LandMarkInfoMap(userCountry: String, userCity : String, landmarkArray: MutableList<NearLandmark>, userLocation: Location, languageSetting : String, buttonTxt : Map<String, String>, modifier: Modifier = Modifier){
     val context = LocalContext.current
     val deviceInfo = LocalConfiguration.current //현재 디바이스의 정보
     val mapCamera = CameraPosition.fromLatLngZoom(LatLng(userLocation.latitude,userLocation.longitude),15.0f)//구글 지도 카메라
@@ -207,6 +212,8 @@ fun LandMarkInfoMap( landmarkArray: MutableList<NearLandmark>, userLocation: Loc
                     colors = ButtonDefaults.buttonColors(containerColor = Color(38,122,240), contentColor = Color.White)
                     ,onClick = {
                         val intent = Intent(context, ExplainLandMark::class.java)
+                        intent.putExtra("country",userCountry)
+                        intent.putExtra("city",userCity)
                         intent.putExtra("languageSetting", languageSetting)
                         intent.putExtra("LandmarkName", placeName.value)
                         intent.putExtra("TranslatedName", translatedName.value)
@@ -262,6 +269,6 @@ fun GreetingPreview() {
     user.longitude = -9.4411821
     TravelEyeTheme (darkTheme = false) {
 
-        LandMarkInfoMap(arr, user, "korean", buttonTxt)
+        LandMarkInfoMap("SOUTH KOREA","SEOUL",arr, user, "korean", buttonTxt)
     }
 }
