@@ -59,47 +59,56 @@ import com.google.firebase.firestore.firestore
 
 class ExplainLandMark : ComponentActivity() {
 
-    private lateinit var connectionManager: ConnectivityManager
-    private lateinit var networkCallback : ConnectivityManager.NetworkCallback
-    private lateinit var errorIntent : Intent
+    private lateinit var connectionManager: ConnectivityManager//네트워크 상태를 확인하기 위한 오브젝트
+    private lateinit var networkCallback : ConnectivityManager.NetworkCallback//네트워크 상태에 따른 명령을 실행할 Callback 함수
 
-    private lateinit var landmarkIntent : Intent
-    private lateinit var userCountry : String
-    private lateinit var userCity : String
-    private var landmarkName = ""
-    private var translatedName = ""
-    private var description = mutableStateOf("")
-    private var showProgress = mutableStateOf(true)
-    private lateinit var languageSetting : String
-    private val openDialog = mutableStateOf(false)
-    private var state = mutableStateOf("none")
+    private lateinit var errorIntent : Intent //에러를 MainActivity에 보낼 Intent
+
+    private lateinit var userCountry : String//현재 사용자가 있는 국가
+    private lateinit var userCity : String//현재 사용자가 있는 도시
+
+    private lateinit var landmarkIntent : Intent//SuccessLandmark에서 넘어온 랜드마크 정보를 가진 Intent
+    private var landmarkName = ""//검색할 랜드마크 이름
+    private var translatedName = ""//번역된 랜드마크 이름
+
+    private var description = mutableStateOf("")//Gemini의 설명을 저장할 mutableState 함수
+    private var state = mutableStateOf("none")//Gemini 결과의 상태를 저장할 mutableState 함수 [PROCESSING, ERRORED, COMPLETED]
+
+    private var showProgress = mutableStateOf(true)//Gemini 결과가 도착하기 전까지 Circular Progress bar 표시를 유무를 판별할 함수
+
+    private lateinit var languageSetting : String//사용자 언어설정
+
+    private val openAIDialog = mutableStateOf(false)//AI 설명 주의 다이얼로그를 띄울 유무를 판별할 mutableState 함수
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d("EXPLAINLANDMARK", "ONCREATE")
-        errorIntent = Intent(this, MainActivity::class.java)
+        errorIntent = Intent(this, MainActivity::class.java)//에러가 생기면 MainActivity로 이동시킬 Intent 초기화
+
         networkCallback = object : ConnectivityManager.NetworkCallback(){
             override fun onLost(network: Network) {//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
                 super.onLost(network)
                 backToMainActivity("CONNECTION_LOST")
             }
         }
-        connectionManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        connectionManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager//네트워크 연결 상태 체크 오브젝트 초기화
         connectionManager.registerDefaultNetworkCallback(networkCallback)
         when (connectionManager.activeNetwork){//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
             null -> backToMainActivity("CONNECTION_LOST")
         }
 
-        landmarkIntent = intent
-        userCountry = landmarkIntent.getStringExtra("country")!!
-        userCity = landmarkIntent.getStringExtra("city")!!
-        if (userCity == ""){
+        landmarkIntent = intent//SuccessLandmark에서 넘어온 intent를 저장
+
+        userCountry = landmarkIntent.getStringExtra("country")!!//사용자 위치의 국가를 Intent에서 가져옴
+        userCity = landmarkIntent.getStringExtra("city")!!//사용자 위치의 도시를 Intent에서 가져옴
+        if (userCity == ""){//싱가포르와 같이 도시 국가는 도시가 따로 없어 비어있을 경우 Gemini에게 요청을 보낼 때 국가와 도시를 같게 해서 요청함
             userCity = userCountry
         }
-        landmarkName = landmarkIntent.getStringExtra("LandmarkName")!!
-        translatedName = landmarkIntent.getStringExtra("TranslatedName")!!
-        languageSetting = landmarkIntent.getStringExtra("languageSetting")!!
 
-
+        landmarkName = landmarkIntent.getStringExtra("LandmarkName")!!//장소 이름을 Intent에서 가져옴
+        translatedName = landmarkIntent.getStringExtra("TranslatedName")!!//MLkit으로 번역된 장소 이름을 Intent에서 가져옴
+        languageSetting = landmarkIntent.getStringExtra("languageSetting")!!//언어 설정을 Intent에서 가져옴
 
         setContent {
             TravelEyeTheme {
@@ -108,9 +117,9 @@ class ExplainLandMark : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    LandmarkDescription(landmarkName, translatedName, description, openDialog)
+                    LandmarkDescription(landmarkName, translatedName, description, openAIDialog)//Gemini설명과 장소 이름을 표현할 UI
                     CircularProgress(showProgress = showProgress)//Gemini Response가 오기 전까지 원형 프로그래스바 실행
-                    AiDialog(openDialog = openDialog, languageSetting = languageSetting)//ai로 만들어진 설명이라는 다이얼로그
+                    AiDialog(openDialog = openAIDialog, languageSetting = languageSetting)//ai로 만들어진 설명이라는 주의 다이얼로그
                 }
             }
         }
@@ -118,8 +127,7 @@ class ExplainLandMark : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-
-        if (state.value == "none"){
+        if (state.value == "none"){//이전에 검색한 결과가 없으면 GEMINI에 설명 요청
             showProgress.value = true
             useGemini(landmarkName, languageSetting)//firebase gemini에 설명 요청
         }
@@ -132,7 +140,7 @@ class ExplainLandMark : ComponentActivity() {
         description.value = ""
     }
 
-    private fun backToMainActivity(errorMsg : String){
+    private fun backToMainActivity(errorMsg : String){//문제가 생겼을 때 MainActivity로 돌아가 에러 다이얼로그를 띄움
         onDestroy()
         finish()
         errorIntent.putExtra("isError", true)

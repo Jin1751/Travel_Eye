@@ -68,32 +68,32 @@ import com.google.mlkit.nl.translate.TranslatorOptions
 import kotlinx.coroutines.launch
 
 @Parcelize
-data class NearLandmark(var engName: String, var translatedName : String, val score: Double, val locate : Location) : Parcelable
+data class NearLandmark(var engName: String, var translatedName : String, val score: Double, val locate : Location) : Parcelable//사용자와 가까운 검색된 랜드마크들의 정보를 저장할 Parcelable 인터페이스
 
 class SuccessLandmark : ComponentActivity() {
 
-    private lateinit var connectionManager: ConnectivityManager
-    private lateinit var networkCallback : ConnectivityManager.NetworkCallback
-    private lateinit var errorIntent : Intent
+    private lateinit var connectionManager: ConnectivityManager//네트워크 상태를 확인하기 위한 오브젝트
+    private lateinit var networkCallback : ConnectivityManager.NetworkCallback//네트워크 상태에 따른 명령을 실행할 Callback 함수
+    private lateinit var errorIntent : Intent//에러를 MainActivity에 보낼 Intent
 
-    private lateinit var locationIntent : Intent
+    private lateinit var locationIntent : Intent//MainActivity에서 넘어온 사용자 위치 정보를 가진 Intent
 
-    private lateinit var userLocation :Location
-    private lateinit var userCountry : String
-    private lateinit var userCity : String
+    private lateinit var userLocation :Location//사용자 위치 Location 오브젝트
+    private lateinit var userCountry : String//현재 사용자가 있는 국가
+    private lateinit var userCity : String//현재 사용자가 있는 도시
 
 
     private val landmarkArray : MutableList<NearLandmark> = mutableListOf()//랜드마크들을 저장할 리스트
 
-    private lateinit var engKorTranslator : Translator
-    private lateinit var translatorCondition : DownloadConditions
-    private lateinit var languageSetting : String
-    private val translateLanguage = mapOf("korean" to TranslateLanguage.KOREAN, "english" to TranslateLanguage.ENGLISH)
+    private lateinit var engKorTranslator : Translator//영->한 MLkit 번역기 오브젝트
+    private lateinit var translatorCondition : DownloadConditions//영->한 번역을 위한 사전 다운로드를 확인하는 오브젝트
+    private lateinit var languageSetting : String//사용자 언어설정
+    private val translateLanguage = mapOf("korean" to TranslateLanguage.KOREAN, "english" to TranslateLanguage.ENGLISH)//번역기 언어설정을 위한 mapOf 오브젝트 (추후 다른 언어를 추가해 번역기 설정 변경 가능하도록 함)
 
-    private val buttonTxt = mapOf("korean" to "AI 설명 보기", "english" to "See AI Description")
+    private val buttonTxt = mapOf("korean" to "AI 설명 보기", "english" to "See AI Description")//ExplainLandMark로 Gemini에 설명을 요청할 버튼
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        errorIntent = Intent(this, MainActivity::class.java)
+        errorIntent = Intent(this, MainActivity::class.java)//에러가 생기면 MainActivity로 이동시킬 Intent 초기화
         networkCallback = object : ConnectivityManager.NetworkCallback(){
             override fun onLost(network: Network) {//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
                 super.onLost(network)
@@ -106,20 +106,27 @@ class SuccessLandmark : ComponentActivity() {
             null -> backToMainActivity()
         }
 
-        locationIntent = intent
-        userCountry = locationIntent.getStringExtra("country")!!
-        userCity = locationIntent.getStringExtra("city")!!
+        locationIntent = intent//MainActivity에서 넘어온 intent를 저장
+
+        userCountry = locationIntent.getStringExtra("country")!!//사용자 위치의 국가를 Intent에서 가져옴
+        userCity = locationIntent.getStringExtra("city")!!//사용자 위치의 도시를 Intent에서 가져옴
+
         userLocation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {//빌드 버전 33 이상 시 인텐트에서 사용자 위치 가져오는 작업
             locationIntent.getParcelableExtra("userLocation",Location::class.java)!!
-        }else{//빌드 버전 33 미만시
+        }else{//빌드 버전 33 미만시 인텐트에서 사용자 위치 가져오는 작업
             locationIntent.getParcelableExtra("userLocation")!!
         }
+
         Log.d("SUCCESS USERLOC", userLocation.latitude.toString() + ", " + userLocation.longitude)
-        val langOptions = TranslatorOptions.Builder().setSourceLanguage(translateLanguage["english"]!!).setTargetLanguage(translateLanguage["korean"]!!).build()
-        engKorTranslator = Translation.getClient(langOptions)
-        translatorCondition = DownloadConditions.Builder().requireWifi().build()
-        engKorTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Toast.makeText(this,"번역 언어 다운로드 오류",Toast.LENGTH_LONG).show() }
-        languageSetting = locationIntent.getStringExtra("languageSetting")!!
+
+        languageSetting = locationIntent.getStringExtra("languageSetting")!!//사용자 언어설정의 도시를 Intent에서 가져옴
+
+        val langOptions = TranslatorOptions.Builder().setSourceLanguage(translateLanguage["english"]!!).setTargetLanguage(translateLanguage[languageSetting]!!).build()//영어에서 설정된 언어로 번역할 MLkit 번역기 생성
+
+        engKorTranslator = Translation.getClient(langOptions)//MLkit 번역기 오브젝트 초기화
+        translatorCondition = DownloadConditions.Builder().requireWifi().build()//번역 언어가 제대로 다운로드 됐는지 확인할 오브젝트 생성
+        engKorTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Toast.makeText(this,"번역 언어 다운로드 오류",Toast.LENGTH_LONG).show() }//번역기 다운로드가 필요하면 다운로드, 다운로드 오류시 토스트 메세지 생성
+
        setContent {
                 TravelEyeTheme {
                     // A surface container using the 'background' color from the theme
@@ -144,7 +151,7 @@ class SuccessLandmark : ComponentActivity() {
                 locationIntent.getParcelableExtra("landMark$i")
             }
             if (lm != null) {//랜드마크가 null이 아닐 경우만 리스트에 저장
-                if (languageSetting != "english"){
+                if (languageSetting != "english"){//언어 설정이 영어가 아닐경우 설정된 언어로 번역
                     engKorTranslator.translate(lm.engName).addOnSuccessListener {
                         lm.translatedName = it
                     }
@@ -160,7 +167,7 @@ class SuccessLandmark : ComponentActivity() {
 
     }
 
-    private fun backToMainActivity(){
+    private fun backToMainActivity(){//문제가 생겼을 때 MainActivity로 돌아가 에러 다이얼로그를 띄움
         onDestroy()
         finish()
         errorIntent.putExtra("isError", true)
@@ -182,7 +189,7 @@ fun LandMarkInfoMap(userCountry: String, userCity : String, landmarkArray: Mutab
     val translatedName = mutableStateOf("Please Select LandMark")
 
     val backgroundColor = when (context.resources.configuration.uiMode) {//스마트폰 다크모드와 라이트 모드에 따라 하단 정보창 배경색을 결정
-       33 -> {//다크모드일때
+       33 -> {//다크모드(33)일때
             Color.Black
         }
         else -> {//라이트 모드일때
@@ -191,7 +198,8 @@ fun LandMarkInfoMap(userCountry: String, userCity : String, landmarkArray: Mutab
     }
 
     ModalBottomSheetLayout(//지도 하단에 표시될 랜드마크 정보창 & 구글 맵
-        sheetState = bottomSheetState, sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+        sheetState = bottomSheetState,
+        sheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
         sheetContentColor = LocalContentColor.current, sheetBackgroundColor = backgroundColor,
         sheetElevation = 10.dp,
         sheetContent = @Composable {
@@ -211,13 +219,13 @@ fun LandMarkInfoMap(userCountry: String, userCity : String, landmarkArray: Mutab
                     .height((deviceInfo.screenHeightDp * 0.065).dp), shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(38,122,240), contentColor = Color.White)
                     ,onClick = {
-                        val intent = Intent(context, ExplainLandMark::class.java)
-                        intent.putExtra("country",userCountry)
-                        intent.putExtra("city",userCity)
-                        intent.putExtra("languageSetting", languageSetting)
-                        intent.putExtra("LandmarkName", placeName.value)
-                        intent.putExtra("TranslatedName", translatedName.value)
-                        startActivity(context,intent,null)})// AI 설명을 요청할 버튼
+                        val intent = Intent(context, ExplainLandMark::class.java)//ExplainLandMark로 정보를 넘길 Intent 초기화
+                        intent.putExtra("country",userCountry)//현재 사용자의 국가 영어 이름을 Intent에 저장 (Gemini에 영어로 질문을 할 것이기 때문)
+                        intent.putExtra("city",userCity)//현재 사용자의 도시 영어 이름을 Intent에 저장 (Gemini에 영어로 질문을 할 것이기 때문)
+                        intent.putExtra("languageSetting", languageSetting)//현재 사용자 언어설정을 Intent에 저장
+                        intent.putExtra("LandmarkName", placeName.value)//설명을 요청할 랜드마크 영어 이름을 Intent에 저장 (Gemini에 영어로 질문을 할 것이기 때문)
+                        intent.putExtra("TranslatedName", translatedName.value)//설명을 요청할 번역된 랜드마크 이름을 Intent에 저장 (이름 표현용)
+                        startActivity(context,intent,null)})// AI 설명을 요청할 버튼 (ExplainLandMark로 이동)
                 {
                     Text(buttonTxt[languageSetting]!!,fontSize = 20.sp)
                 }
