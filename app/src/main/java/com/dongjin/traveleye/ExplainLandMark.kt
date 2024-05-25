@@ -1,6 +1,5 @@
 package com.dongjin.traveleye
 
-import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
@@ -16,11 +15,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.Icon
@@ -46,7 +45,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dongjin.traveleye.ui.theme.TravelEyeTheme
 import com.google.firebase.Firebase
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.firestore
 
 class ExplainLandMark : ComponentActivity() {
@@ -73,6 +72,7 @@ class ExplainLandMark : ComponentActivity() {
 
     private var description = mutableStateOf("")//Gemini의 설명을 저장할 mutableState 함수
     private var state = mutableStateOf("none")//Gemini 결과의 상태를 저장할 mutableState 함수 [PROCESSING, ERRORED, COMPLETED]
+    private lateinit var geminiListener : ListenerRegistration//firestore에서 Gemini의 결과를 받아올 리스너 오브젝트
 
     private var showProgress = mutableStateOf(true)//Gemini 결과가 도착하기 전까지 Circular Progress bar 표시를 유무를 판별할 함수
 
@@ -88,15 +88,20 @@ class ExplainLandMark : ComponentActivity() {
         networkCallback = object : ConnectivityManager.NetworkCallback(){
             override fun onLost(network: Network) {//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
                 super.onLost(network)
+                connectionManager.unregisterNetworkCallback(networkCallback)
                 backToMainActivity("CONNECTION_LOST")
             }
+
         }
 
-        connectionManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager//네트워크 연결 상태 체크 오브젝트 초기화
+        connectionManager = this.applicationContext.getSystemService(ConnectivityManager::class.java) as ConnectivityManager//네트워크 연결 상태 체크 오브젝트 초기화
+
         connectionManager.registerDefaultNetworkCallback(networkCallback)
         when (connectionManager.activeNetwork){//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
             null -> backToMainActivity("CONNECTION_LOST")
         }
+
+
 
         landmarkIntent = intent//SuccessLandmark에서 넘어온 intent를 저장
 
@@ -133,11 +138,13 @@ class ExplainLandMark : ComponentActivity() {
         }
     }
 
-
     override fun onDestroy() {
         super.onDestroy()
+        connectionManager.unregisterNetworkCallback(networkCallback)//네트워크 상태에 따른 CallBack함수 연결 해제
         state.value = "none"
         description.value = ""
+
+
     }
 
     private fun backToMainActivity(errorMsg : String){//문제가 생겼을 때 MainActivity로 돌아가 에러 다이얼로그를 띄움
@@ -187,9 +194,10 @@ class ExplainLandMark : ComponentActivity() {
             Log.d("FIREBASE COLLECTION WRITE", "FAILED $it")//collection 수정 실패
             backToMainActivity("GEMINI_ERR")//error 발생으로 MainActivity로 전환
         }
+
         val response = firestore.collection("generate").document("geminidoc")//gemini의 설명과 상태를 가진 firestore 문서
 
-        response.addSnapshotListener{//firestore 문서의 변화가 생기면 반응할 리스너 설정
+        geminiListener = response.addSnapshotListener{//firestore 문서의 변화가 생기면 반응할 리스너 설정
             snapshot, e ->
             if (e != null) {//gemini exception발생으로 MainActivity로 전환
                 Log.d("FIREBASE GEMINI ", "Listen failed.", e)
@@ -213,6 +221,8 @@ class ExplainLandMark : ComponentActivity() {
                     showProgress.value = false//원형 프로그래스바 중지
                     if (errorCheck){//gemini에서 error 발생시 MainActivity로 전환
                         backToMainActivity("GEMINI_ERR")
+                    }else{
+                       geminiListener.remove()//리스너를 없애주지 않으면 다른 액티비티로 넘어가도 계속 작동하며 메모리 누수 발생
                     }
                 }
                 else{//gemini가 작업 중일땐 원형 프로그래스바 표현
@@ -223,13 +233,14 @@ class ExplainLandMark : ComponentActivity() {
                 backToMainActivity("GEMINI_ERR")
             }
         }
+
     }
 }
 
 @Composable
 fun LandmarkDescription(landmarkName: String, translatedName : String, description: MutableState<String>, openDialog: MutableState<Boolean>,modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val lineColor = when (context.resources.configuration.uiMode) {//스마트폰 다크모드와 라이트 모드에 따라 이름 밑줄 색을 결정
+    //val context = LocalContext.current context.resources.configuration.uiMode
+    val lineColor = when (33) {//스마트폰 다크모드와 라이트 모드에 따라 이름 밑줄 색을 결정
         33 -> {//다크모드일때
             Color.White
         }
@@ -239,12 +250,12 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-
+        Spacer(modifier = modifier.fillMaxHeight(0.03f))
         Text(
             text = landmarkName,
             modifier = modifier
                 .fillMaxWidth(0.95f)
-                .offset(x = 10.dp, y = 30.dp)
+                .offset(x = 10.dp)
                 .drawBehind {
                     val y = size.height + 10
                     drawLine(
@@ -258,27 +269,30 @@ fun LandmarkDescription(landmarkName: String, translatedName : String, descripti
             maxLines = 1,
             overflow =  TextOverflow.Ellipsis
         )
-        Row(modifier = modifier.offset(x = 10.dp, y = 40.dp)){
-            Icon(imageVector = Icons.Default.Translate, contentDescription = "translate", tint = Color.Gray)
-            Text(text = " $translatedName",
-                modifier = modifier.fillMaxWidth(0.95f),
-                lineHeight = 32.sp,
-                fontSize = 20.sp,
-                color = Color.Gray,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow =  TextOverflow.Ellipsis)
+        if(translatedName != "none"){
+            Spacer(modifier = modifier.fillMaxHeight(0.01f))
+            Row{
+                Spacer(modifier = modifier.fillMaxWidth(0.03f))
+                Icon(imageVector = Icons.Default.Translate, contentDescription = "translate", tint = Color.Gray)
+                Text(text = " $translatedName",
+                    modifier = modifier.fillMaxWidth(0.95f),
+                    lineHeight = 32.sp,
+                    fontSize = 20.sp,
+                    color = Color.Gray,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow =  TextOverflow.Ellipsis)
+            }
         }
-
-        Spacer(modifier = modifier.height(32.dp))
+        Spacer(modifier = modifier.fillMaxHeight(0.005f))
         val screenW = LocalConfiguration.current.screenWidthDp
         IconButton(modifier = modifier
             .offset(x = (screenW - 55).dp)
-            .size(50.dp),
+            .wrapContentSize(),
             onClick = {
                 openDialog.value = true
             }) {
-            Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AIDialog", tint = Color(38,124,240,255), modifier = modifier.size(35.dp))
+            Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AIDialog", tint = Color(38,124,240,255), modifier = modifier.fillMaxSize(0.8f))
         }
         Box(modifier = modifier
             .padding(5.dp)

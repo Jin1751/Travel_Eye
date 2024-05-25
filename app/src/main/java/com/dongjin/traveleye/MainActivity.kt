@@ -1,5 +1,6 @@
 package com.dongjin.traveleye
 
+
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -94,15 +95,15 @@ import com.google.firebase.ktx.Firebase
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
-import com.google.mlkit.common.model.DownloadConditions
-import com.google.mlkit.nl.translate.TranslateLanguage
-import com.google.mlkit.nl.translate.Translation
-import com.google.mlkit.nl.translate.Translator
-import com.google.mlkit.nl.translate.TranslatorOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 import java.io.ByteArrayOutputStream
+
 
 open class MainActivity : ComponentActivity() {
 
@@ -117,10 +118,10 @@ open class MainActivity : ComponentActivity() {
 
     private lateinit var userLocation : Location//사용자의 현재 위치를 저장할 Location 오브젝트
 
-    private var country = mutableStateOf("Country")//현재 사용자 위치의 국가를 저장할 mutableState 함수
+    private var country = mutableStateOf("")//현재 사용자 위치의 국가를 저장할 mutableState 함수
     private var city = mutableStateOf("")//현재 사용자 위치의 도시를 저장할 mutableState 함수
-    private var engCountry = "Country"//intent로 Gemini에게 보낼 영어 국가이름 (Gemini에 영어로 질문을 할 것이기 때문)
-    private var engCity = ""//intent로 Gemini에게 보낼 영어 도시이름 (Gemini에 영어로 질문을 할 것이기 때문)
+    private var engCountry =  mutableStateOf("")//intent로 Gemini에게 보낼 영어 국가이름 (Gemini에 영어로 질문을 할 것이기 때문)
+    private var engCity = mutableStateOf("")//intent로 Gemini에게 보낼 영어 도시이름 (Gemini에 영어로 질문을 할 것이기 때문)
 
     private var disableBtn = mutableStateOf(false)//네트워크가 안됐을때 검색버튼을 비활성화하기 위한 mutableState 함수 (네트워크 정상시 활성화)
 
@@ -136,11 +137,9 @@ open class MainActivity : ComponentActivity() {
 
     private var showProgress = mutableStateOf(false)//Cloud Vision API 결과가 도착하기 전까지 Circular Progress bar 표시를 유무를 판별할 함수
 
-    private lateinit var engKorTranslator : Translator//영->한 MLkit 번역기 오브젝트
-    private lateinit var translatorCondition : DownloadConditions//영->한 번역을 위한 사전 다운로드를 확인하는 오브젝트
     private var languageSetting = mutableStateOf("english")
-    private val translateLanguage = mapOf("korean" to TranslateLanguage.KOREAN, "english" to TranslateLanguage.ENGLISH)//번역기 언어설정을 위한 mapOf 오브젝트 (추후 다른 언어를 추가해 번역기 설정 변경 가능하도록 함)
-
+    private val translateLanguage = mapOf("korean" to "ko", "english" to "en")//번역기 언어설정을 위한 mapOf 오브젝트 (추후 다른 언어를 추가해 번역기 설정 변경 가능하도록 함)
+    private lateinit var translateApi : TranslateApi
 
     private val openAIDialog = mutableStateOf(false)//AI 설명 주의 다이얼로그를 띄울 유무를 판별할 mutableState 함수
 
@@ -148,27 +147,30 @@ open class MainActivity : ComponentActivity() {
     private val errorState = mutableStateOf("UNKNOWN")//에러의 종류를 판별하기 위한 mutableState 함수
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val retrofit = Retrofit.Builder().baseUrl("https://translation.googleapis.com/language/translate/").addConverterFactory(GsonConverterFactory.create()).build()
+        translateApi = retrofit.create(TranslateApi::class.java)
+
         userLocation = Location(LOCATION_SERVICE)
 
         checkPermissions()
-        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager//위치 정보 접근 오브젝트 생성
+        locationManager = this.applicationContext.getSystemService(LOCATION_SERVICE) as LocationManager//위치 정보 접근 오브젝트 생성
         locationListener = LocationListener { location ->
             userLocation = location
             getAddress()
 
         }// 위치 정보가 바뀌었을때 반응할 리스너 오브젝트
         startLocationUpdate()//위치 정보 업데이트 시작
-        getAddress()//사용자의 위치에 맞는 국가와 도시 검색 및 텍스트 UI 작용
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         try{//앱 시작시 바로 검색을 하면 에러가 발생해 가장 최근에 알려진 장소를 먼저 사용자 위치로 설정, 위치 권한 설정이 안 돼있을 수 있어 try-catch로 작성함
             fusedLocationClient.lastLocation.addOnSuccessListener {
                     userLocation = it//fusedLocation은 여러 위치 제공자를 융합해 정확한 최신 위치 정보를 제공하지만 배터리 소모가 큼, 앱이 실행됐을때 맨 처음 위치를 잡아야해서 fusedLocation을 사용했음, 이후엔 리소스 절약을 위해 LocationManager사용
+                    Log.d("Trans before," ," start")
                     getAddress()
             }
         }catch (_: SecurityException){
             checkPermissions()//권한 설정 함수 실행
         }
-
         dataStore = StoreLanguageSetting(this)//언어 설정을 가지고 있는 DataStore를 불러옴
         runBlocking {
             languageSetting.value = dataStore.getLanguageSetting.first()//앱 시작시 저장된 언어 설정을 가지고 오기까지 잠시 대기
@@ -226,11 +228,6 @@ open class MainActivity : ComponentActivity() {
                 }
             }
         this.auth.signInAnonymously()//firebase에 익명 사용자로 로그인
-        val langOptions = TranslatorOptions.Builder().setSourceLanguage(translateLanguage["english"]!!).setTargetLanguage(translateLanguage[languageSetting.value]!!).build()//영어 -> 설정된 언어로 번역옵션 설정
-        engKorTranslator = Translation.getClient(langOptions)//mlkit 번역기 생성
-        translatorCondition = DownloadConditions.Builder().requireWifi().build()// 번역 언어 다운로드 상태 체크 오브젝트
-        engKorTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Toast.makeText(this,"번역 언어 다운로드 오류",Toast.LENGTH_LONG).show() }//번역 언어 다운로드, 오류시 토스트 메세지 출력
-
 
         setContent {
             TravelEyeTheme {
@@ -241,7 +238,7 @@ open class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
 
-                    MainActivity(dataStore, city, country, searchTxt, disableBtn, imgUri, isSearchImg, languageSetting, engKorTranslator, openAIDialog)
+                    MainActivity(dataStore, city, engCity, country, engCountry, searchTxt, disableBtn, imgUri, isSearchImg, languageSetting, translateApi, openAIDialog)
                     CircularProgressBar(showProgress = showProgress)//Cloud Vision API 결과가 오기 전까지 원형 프로그래스바 실행
                     AIDialog(openAIDialog = openAIDialog, languageSetting = languageSetting)//ai로 만들어진 설명이라는 주의 다이얼로그
                     ErrorDialog(errorOccurred = errorOccurred, errorState = errorState, languageSetting = languageSetting)//에러를 띄울 다이얼로그
@@ -337,6 +334,7 @@ open class MainActivity : ComponentActivity() {
 
                             // Multiple locations are possible, e.g., the location of the depicted
                             // landmark and the location the picture was taken.
+
                             for (loc in labelObj["locations"].asJsonArray) {//검색된 장소들의 정보 중 위치 정보만 하나씩 가져옴
                                 val latitude = loc.asJsonObject["latLng"].asJsonObject["latitude"]//검색된 장소의 위도
                                 val longitude = loc.asJsonObject["latLng"].asJsonObject["longitude"]//검색된 장소의 경도
@@ -346,7 +344,7 @@ open class MainActivity : ComponentActivity() {
                                 if (userLocation.distanceTo(place) < 5000){//사용자와 검색된 장소의 거리를 계산해 5km이내의 장소만 저장
                                     totalLandmark += 1
                                     Log.d("VISION $totalLandmark", "Distance: " + userLocation.distanceTo(place) + ", LANDMARK NAME: " + landmarkName)
-                                    val landmark = NearLandmark(landmarkName, landmarkName, score, place)//NearLandmark 인터페이스로 랜드마크 정보 저장
+                                    val landmark = NearLandmark(landmarkName, "none", score, place)//NearLandmark 인터페이스로 랜드마크 정보 저장
                                     intent.putExtra("landMark$totalLandmark", landmark)//SuccessLandmark에 보낼 intent에 검색된 랜드마크 저장
                                 }
                             }
@@ -358,8 +356,8 @@ open class MainActivity : ComponentActivity() {
                             errorOccurred.value = true
                             errorState.value = "NOT_FOUND"
                         }else{
-                            intent.putExtra("country",engCountry)//SuccessLandmark에 보낼 intent에 현재 사용자 위치 국가 영어 이름 저장
-                            intent.putExtra("city",engCity)//SuccessLandmark에 보낼 intent에 현재 사용자 위치 도시 영어 이름 저장
+                            intent.putExtra("country",engCountry.value)//SuccessLandmark에 보낼 intent에 현재 사용자 위치 국가 영어 이름 저장
+                            intent.putExtra("city",engCity.value)//SuccessLandmark에 보낼 intent에 현재 사용자 위치 도시 영어 이름 저장
                             intent.putExtra("totalLandmark",totalLandmark)//SuccessLandmark에 보낼 intent에 조건에 맞는 검색된 총 랜드마크 수 저장
                             intent.putExtra("languageSetting", languageSetting.value)//SuccessLandmark에 보낼 intent에 현재 언어설정 저장
                             startActivity(intent)////SuccessLandmark 시작
@@ -386,7 +384,6 @@ open class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         Log.d("onStop", "onStop")
-        //engKorTranslator.close() 닫으면 다시 돌아와서 언어설정을 바꿨을때 에러가 남
         stopLocationUpdate()//위치 정보 업데이트 중단 (리소스 확보)
     }
 
@@ -394,6 +391,7 @@ open class MainActivity : ComponentActivity() {
         Log.d("onDestroy", "onDestroy")
         super.onDestroy()
         connectionManager.unregisterNetworkCallback(networkCallback)//네트워크 상태에 따른 CallBack함수 연결 해제
+
     }
 
 
@@ -410,7 +408,7 @@ open class MainActivity : ComponentActivity() {
                         try{
                             fusedLocationClient.lastLocation.addOnSuccessListener {//마지막으로 알려진 사용자 정보를 불러옴
                                 userLocation = it
-                                getAddress()
+                                //getAddress()
                             }
                         }catch (_: SecurityException){
                         }
@@ -458,35 +456,29 @@ open class MainActivity : ComponentActivity() {
             val geoListener = GeocodeListener {//사용자 위치에 맞는 주소 검색
                 addresses ->
 
-                engCountry = addresses[0].countryName//Gemini에 보낼 영어로 된 국가 이름 저장
-
+                engCountry.value = addresses[0].countryName//Gemini에 보낼 영어로 된 국가 이름 저장
                 if  (addresses[0].adminArea == null){//주소에 도시가 없을 경우 도시는 공백 처리 (싱가포르 같은 도시국가는 도시가 따로 없음)
                     city.value = ""
-                    engCity = ""
+                    engCity.value = ""
                 }else{//주소에 도시가 있을 경우
-                    engCity = addresses[0].adminArea//Gemini에 보낼 영어로 된 도시 이름 저장
+                    engCity.value = addresses[0].adminArea//Gemini에 보낼 영어로 된 도시 이름 저장
                 }
 
                 if (languageSetting.value != "english") {//언어 설정이 영어가 아닌 경우 번역기로 나라, 도시 번역
-                    engKorTranslator.translate(addresses[0].countryName).addOnSuccessListener {
-                        country.value = it//국가 이름을 번역해 UI에 적용
-                    }
+                    translateAddr(engCountry.value, translateLanguage[languageSetting.value]!!,country)
                     if (addresses[0].adminArea != null){//주소에 도시가 있을 경우 도시도 번역 & 저장
-                        engKorTranslator.translate(addresses[0].adminArea).addOnSuccessListener {
-                            city.value = it//도시 이름을 번역해 UI에 적용
-                        }
+                        translateAddr(engCity.value, translateLanguage[languageSetting.value]!!, city)
                     }
-                    Log.d("USER city", city.value)
                 }
                 else{//언어 설정이 영어인 경우
                     country.value = addresses[0].countryName//영어로 된 국가 이름을 UI에 적용
-
                     if (addresses[0].adminArea != null){//주소에 도시가 있을 경우
                         city.value = addresses[0].adminArea//주소에 도시가 있을 경우 도시도 저장
                     }
                 }
 
             }
+
             geocoder.getFromLocation(userLocation.latitude,userLocation.longitude,1,geoListener)
         }
         else{// API 33부턴 getFromLocation이 deprecated 돼 api 수준에 따라 분리함 (33이전 버전에 관한 작업)
@@ -495,24 +487,19 @@ open class MainActivity : ComponentActivity() {
                 if (addr.isNotEmpty()){
                     val address = addr[0]
 
-                    engCountry = address.countryName//Gemini에 보낼 영어로 된 국가 이름 저장
+                    engCountry.value = address.countryName//Gemini에 보낼 영어로 된 국가 이름 저장
 
                     if(address.adminArea == null){//주소에 도시가 없을 경우 도시는 공백 처리 (싱가포르 같은 도시국가는 도시가 따로 없음)
                         city.value = ""
-                        engCity = ""
+                        engCity.value = ""
                     } else{//주소에 도시가 있을 경우
-                        engCity = address.adminArea//Gemini에 보낼 영어로 된 도시 이름 저장
+                        engCity.value = address.adminArea//Gemini에 보낼 영어로 된 도시 이름 저장
                     }
 
                     if (languageSetting.value != "english"){//언어 설정이 영어가 아닌 경우 번역기로 나라, 도시 번역
-                        engKorTranslator.translate(address.countryName).addOnSuccessListener {
-                            country.value =  it//국가 이름을 번역해 UI에 적용
-                        }
-
+                        translateAddr(engCountry.value, translateLanguage[languageSetting.value]!!, country)
                         if (address.adminArea != null){//주소에 도시가 있을 경우 도시도 번역 & 저장
-                            engKorTranslator.translate(address.adminArea).addOnSuccessListener {
-                                city.value = it//도시 이름을 번역해 UI에 적용
-                            }
+                            translateAddr(engCity.value, translateLanguage[languageSetting.value]!!, city)
                         }
                     }
                     else{//언어 설정이 영어일 경우
@@ -526,6 +513,21 @@ open class MainActivity : ComponentActivity() {
             }
         }
     } //현재 사용자 위치에 해당하는 국가와 도시를 가져와 텍스트를 바꾸는 함수
+
+    private fun translateAddr(addr: String, target: String, txtState : MutableState<String>) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val response = translateApi.translate(
+                key = BuildConfig.CLOUD_TRANSLATION,
+                q = addr,
+                source = "en",
+                target = target,
+                format = "text"
+            )
+            txtState.value = response.data.translations[0].translatedText
+            Log.d("Trans Success", response.data.translations[0].translatedText)
+            return@launch
+        }
+    }
 
     private fun scaleBitmap(bitmap: Bitmap): Bitmap {
         val originalWidth = bitmap.width
@@ -562,7 +564,7 @@ open class MainActivity : ComponentActivity() {
 
 @Composable
 //fun MainActivity(cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>, languageSetting: MutableState<String>, modifier: Modifier = Modifier) {
-fun MainActivity(dataStore: StoreLanguageSetting , cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, disableBtn : MutableState<Boolean>, imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>, languageSetting: MutableState<String>, translator: Translator, openDialog: MutableState<Boolean>, modifier: Modifier = Modifier) {
+fun MainActivity(dataStore: StoreLanguageSetting , cityState: MutableState<String>, engCity: MutableState<String>, countryState: MutableState<String>, engCountry: MutableState<String>, searchTxt: MutableState<String>, disableBtn : MutableState<Boolean>, imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>, languageSetting: MutableState<String>, translateApi: TranslateApi, openDialog: MutableState<Boolean>, modifier: Modifier = Modifier) {
     val contxt = LocalContext.current
 
     Column(modifier.fillMaxSize()) {
@@ -571,8 +573,7 @@ fun MainActivity(dataStore: StoreLanguageSetting , cityState: MutableState<Strin
         Spacer(modifier = modifier.fillMaxHeight(0.255f))
         CameraBtn(disableBtn, searchTxt,imgUri, isSearch, contxt)
         Row (modifier = modifier.fillMaxWidth() ,horizontalArrangement = Arrangement.Center){
-            //Spacer(modifier = modifier.width(screenW / 3))
-            SelectTranslation(dataStore, languageSetting, cityState, countryState, searchTxt,translator)
+            SelectTranslation(dataStore, languageSetting, cityState, countryState , engCountry, engCity, searchTxt, translateApi)
         }
         Column (verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(modifier = modifier.fillMaxHeight(0.35f))
@@ -646,20 +647,21 @@ fun CameraBtn(disableBtn: MutableState<Boolean>, searchTxt: MutableState<String>
 
 }//
 @Composable
-fun SelectTranslation(dataStore: StoreLanguageSetting, languageSetting: MutableState<String>, cityState: MutableState<String>, countryState: MutableState<String>, searchTxt: MutableState<String>, translator: Translator, modifier: Modifier = Modifier){
-
+fun SelectTranslation(dataStore: StoreLanguageSetting, languageSetting: MutableState<String>, cityState: MutableState<String>, countryState: MutableState<String>, engCountry: MutableState<String>, engCity: MutableState<String>, searchTxt: MutableState<String>, translateApi: TranslateApi, modifier: Modifier = Modifier){
     val scope = rememberCoroutineScope()
-
     var expandState by remember { mutableStateOf(false) }
-    val language = when (languageSetting.value) {
-        "korean" -> "한국어"
-        "english" -> "English"
-        else -> {"Language"}
+    val language: String
+    var targetLang = "ko"
+    when (languageSetting.value) {
+        "korean" -> {
+            language = "한국어"
+            targetLang = "ko"
+        }
+        "english" -> {
+            language = "English"
+        }
+        else -> {language = "Language"}
     }
-    val langOptions = TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.KOREAN).setTargetLanguage(TranslateLanguage.ENGLISH).build()//영어 -> 한국어 번역옵션 설정
-    val korEngTranslator = Translation.getClient(langOptions)//mlkit 번역기 생성
-    val translatorCondition = DownloadConditions.Builder().requireWifi().build()// 번역 언어 다운로드 상태 체크 오브젝트
-    korEngTranslator.downloadModelIfNeeded(translatorCondition).addOnFailureListener { Log.d("KOR2Eng", "Download Error") }//번역 언어 다운로드
     Row (horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         Spacer(modifier = modifier.fillMaxHeight(0.25f))
         Column {
@@ -680,8 +682,32 @@ fun SelectTranslation(dataStore: StoreLanguageSetting, languageSetting: MutableS
                     DropdownMenuItem(text = { Text("한국어", textAlign = TextAlign.Center, modifier = modifier.fillMaxWidth()) },//언어를 한국어로 설정
                         onClick = {
                             languageSetting.value = "korean"
-                            translator.translate(cityState.value).addOnSuccessListener { cityState.value = it }//mlkit 번역으로 도시 이름을 한국어로 번역
-                            translator.translate(countryState.value).addOnSuccessListener { countryState.value = it }//mlkit 번역으로 나라 이름을 한국어로 번역
+                            if(cityState.value != ""){
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    val response = translateApi.translate(
+                                        key = BuildConfig.CLOUD_TRANSLATION,
+                                        q = engCity.value,
+                                        source = "en",
+                                        target = targetLang,
+                                        format = "text"
+                                    )
+                                    cityState.value = response.data.translations[0].translatedText
+                                    Log.d("Trans Success", response.data.translations[0].translatedText)
+                                    return@launch
+                                }
+                            }
+                            CoroutineScope(Dispatchers.IO).launch {
+                                val response = translateApi.translate(
+                                    key = BuildConfig.CLOUD_TRANSLATION,
+                                    q = engCountry.value,
+                                    source = "en",
+                                    target = targetLang,
+                                    format = "text"
+                                )
+                                countryState.value = response.data.translations[0].translatedText
+                                Log.d("Trans Success", response.data.translations[0].translatedText)
+                                return@launch
+                            }
                             searchTxt.value = "장소 검색"
                             scope.launch {
                                 dataStore.updateLanguageSetting(languageSetting.value)//dataStore에 있는 언어 설정 값을 한국어로 변경
@@ -691,8 +717,10 @@ fun SelectTranslation(dataStore: StoreLanguageSetting, languageSetting: MutableS
                     DropdownMenuItem(text = { Text("English", textAlign = TextAlign.Center, modifier = modifier.fillMaxWidth()) },//언어를 영어로 설정
                         onClick = {
                             languageSetting.value = "english"
-                            korEngTranslator.translate(cityState.value).addOnSuccessListener { cityState.value = it }//mlkit 번역으로 도시 이름을 영어로 번역
-                            korEngTranslator.translate(countryState.value).addOnSuccessListener { countryState.value = it }//mlkit 번역으로 나라 이름을 영어로 번역
+                            if(cityState.value != ""){
+                                cityState.value = engCity.value
+                            }
+                            countryState.value = engCountry.value
                             searchTxt.value = "Search Place"
                             scope.launch {
                                 dataStore.updateLanguageSetting(languageSetting.value)//dataStore에 있는 언어 설정 값을 영어로 변경
@@ -862,7 +890,7 @@ fun MainPreview() {
    //val languageSetting = mutableStateOf("english")
    //val openDialog = mutableStateOf(true)
    //val langOptions = TranslatorOptions.Builder().setSourceLanguage(TranslateLanguage.ENGLISH).setTargetLanguage(TranslateLanguage.KOREAN).build()
-   //val translator = Translation.getClient(TranslatorOptions.Builder().build())
+   //val translator = com.dongjin.traveleye.Translation.getClient(TranslatorOptions.Builder().build())
    //val errorOccurred = mutableStateOf(true)
    //val errorValue = mutableStateOf("VISION_ERR")//NOT_FOUND, VISION_ERR, MAP_ERR, GEMINI_ERR
    TravelEyeTheme {
