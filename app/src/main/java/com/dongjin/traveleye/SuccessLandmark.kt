@@ -11,6 +11,7 @@ import android.os.Parcelable
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.annotation.Keep
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -65,6 +66,7 @@ import kotlinx.coroutines.launch
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
+@Keep
 @Parcelize
 data class NearLandmark(var engName: String, var translatedName : String, val score: Double, val locate : Location) : Parcelable//사용자와 가까운 검색된 랜드마크들의 정보를 저장할 Parcelable 인터페이스
 
@@ -90,6 +92,9 @@ class SuccessLandmark : ComponentActivity() {
     private val buttonTxt = mapOf("korean" to "AI 설명 보기", "english" to "See AI Description")//ExplainLandMark로 Gemini에 설명을 요청할 버튼
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val retrofit = Retrofit.Builder().baseUrl("https://translation.googleapis.com/language/translate/").addConverterFactory(GsonConverterFactory.create()).build()
+        translateApi = retrofit.create(TranslateApi::class.java)
+
         errorIntent = Intent(this, MainActivity::class.java)//에러가 생기면 MainActivity로 이동시킬 Intent 초기화
         networkCallback = object : ConnectivityManager.NetworkCallback(){
             override fun onLost(network: Network) {//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
@@ -102,9 +107,6 @@ class SuccessLandmark : ComponentActivity() {
         when (connectionManager.activeNetwork){//네크워크 연결 문제시 현재 액티비티 종료 후 MainActivity로 복귀
             null -> backToMainActivity()
         }
-
-        val retrofit = Retrofit.Builder().baseUrl("https://translation.googleapis.com/language/translate/").addConverterFactory(GsonConverterFactory.create()).build()
-        translateApi = retrofit.create(TranslateApi::class.java)
 
         locationIntent = intent//MainActivity에서 넘어온 intent를 저장
 
@@ -136,8 +138,13 @@ class SuccessLandmark : ComponentActivity() {
        }
     override fun onStart(){
         super.onStart()
+        val i = locationIntent.extras
+        if (i != null) {
+            for(a in i.keySet()){
+                Log.d("Start SuccessLandmark wawawa,", "START SLM ${i.get(a)}")
+            }
+        }
         val totalLandmark = locationIntent.getIntExtra("totalLandmark",0)//인텐트에 있는 랜드마크의 갯수
-
         for (i in 1..totalLandmark){//인텐트에 있는 랜드마크를 모두 리스트에 저장
             val lm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 locationIntent.getParcelableExtra("landMark$i",NearLandmark::class.java)
@@ -154,7 +161,6 @@ class SuccessLandmark : ComponentActivity() {
                 Log.d("LandMark$i", "NULL")
             }
         }
-
     }
 
     override fun onDestroy() {
@@ -163,6 +169,7 @@ class SuccessLandmark : ComponentActivity() {
 
         connectionManager.unregisterNetworkCallback(networkCallback)//네트워크 상태에 따른 CallBack함수 연결 해제
     }
+
     private fun translateLandmark(lm : NearLandmark,target: String){
         CoroutineScope(Dispatchers.IO).launch {
             val response = translateApi.translate(
@@ -170,11 +177,12 @@ class SuccessLandmark : ComponentActivity() {
                 q = lm.engName,
                 source = "en",
                 target = target,
-                format = "text")
+                format = "text"
+            )
             lm.translatedName = response.data.translations[0].translatedText
-            Log.d("Trans Success", response.data.translations[0].translatedText)
             return@launch
         }
+        //Toast.makeText(this,lm.translatedName,Toast.LENGTH_LONG).show()
     }
 
     private fun backToMainActivity(){//문제가 생겼을 때 MainActivity로 돌아가 에러 다이얼로그를 띄움
@@ -186,7 +194,6 @@ class SuccessLandmark : ComponentActivity() {
     }
 }
 
-
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun LandMarkInfoMap(userCountry: String, userCity : String, landmarkArray: MutableList<NearLandmark>, userLocation: Location, languageSetting : String, buttonTxt : Map<String, String>, modifier: Modifier = Modifier){
@@ -196,7 +203,6 @@ fun LandMarkInfoMap(userCountry: String, userCity : String, landmarkArray: Mutab
         val bottomSheetState = rememberModalBottomSheetState(initialValue = ModalBottomSheetValue.Hidden)//하단 정보창의 상태를 컨트롤 할 상태 변수
     val placeName = mutableStateOf("Please Select LandMark")//랜드마크 이름을 표시할 텍스트 뷰에 들어갈 이름 변수
     val translatedName = mutableStateOf("Please Select LandMark")
-
     val backgroundColor = when (context.resources.configuration.uiMode) {//스마트폰 다크모드와 라이트 모드에 따라 하단 정보창 배경색을 결정
        33 -> {//다크모드(33)일때
             Color.Black
@@ -249,6 +255,7 @@ fun LandMarkInfoMap(userCountry: String, userCity : String, landmarkArray: Mutab
         content = {//랜드마크 설명 창 외에 표시 될 콘텐츠 [구글 지도]
             Box{
                 GoogleMap(
+
                     modifier = modifier.fillMaxSize(),
                     cameraPositionState = CameraPositionState(mapCamera),
                     properties = MapProperties(isMyLocationEnabled = true),

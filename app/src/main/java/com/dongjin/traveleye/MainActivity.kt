@@ -1,7 +1,10 @@
 package com.dongjin.traveleye
 
 
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.Manifest
+import android.animation.ObjectAnimator
+import android.animation.PropertyValuesHolder
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -21,6 +24,8 @@ import android.os.Bundle
 import android.os.Looper
 import android.util.Base64
 import android.util.Log
+import android.view.View
+import android.view.animation.AnticipateInterpolator
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,7 +39,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -75,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.animation.doOnEnd
 import androidx.core.app.ActivityCompat
 import androidx.core.content.FileProvider
 import com.dongjin.traveleye.ui.theme.TravelEyeTheme
@@ -146,7 +154,28 @@ open class MainActivity : ComponentActivity() {
     private val errorOccurred = mutableStateOf(false)//에러가 생겼는지 확인하기 위한 mutableState 함수
     private val errorState = mutableStateOf("UNKNOWN")//에러의 종류를 판별하기 위한 mutableState 함수
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
+
         super.onCreate(savedInstanceState)
+
+        splashScreen.setOnExitAnimationListener {splashScreenView ->
+            val aniScaleX = PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 0f)
+            val aniScaleY = PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 0f)
+            val aniAlpha = PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0f)
+            ObjectAnimator.ofPropertyValuesHolder(
+                splashScreenView.iconView,
+                aniAlpha,
+                aniScaleX,
+                aniScaleY
+            ).run{
+                interpolator = AnticipateInterpolator()
+                duration = 500L
+                doOnEnd { splashScreenView.remove() }
+                start()
+            }
+        }//스플래쉬 화면이 끝날때 앱 로고를 줄어들게 하며 다음 화면으로 넘어가게 하는 애니메이션
+
+
 
         val retrofit = Retrofit.Builder().baseUrl("https://translation.googleapis.com/language/translate/").addConverterFactory(GsonConverterFactory.create()).build()
         translateApi = retrofit.create(TranslateApi::class.java)
@@ -164,9 +193,11 @@ open class MainActivity : ComponentActivity() {
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         try{//앱 시작시 바로 검색을 하면 에러가 발생해 가장 최근에 알려진 장소를 먼저 사용자 위치로 설정, 위치 권한 설정이 안 돼있을 수 있어 try-catch로 작성함
             fusedLocationClient.lastLocation.addOnSuccessListener {
+                if(it != null){
                     userLocation = it//fusedLocation은 여러 위치 제공자를 융합해 정확한 최신 위치 정보를 제공하지만 배터리 소모가 큼, 앱이 실행됐을때 맨 처음 위치를 잡아야해서 fusedLocation을 사용했음, 이후엔 리소스 절약을 위해 LocationManager사용
                     Log.d("Trans before," ," start")
                     getAddress()
+                }
             }
         }catch (_: SecurityException){
             checkPermissions()//권한 설정 함수 실행
@@ -345,6 +376,7 @@ open class MainActivity : ComponentActivity() {
                                     totalLandmark += 1
                                     Log.d("VISION $totalLandmark", "Distance: " + userLocation.distanceTo(place) + ", LANDMARK NAME: " + landmarkName)
                                     val landmark = NearLandmark(landmarkName, "none", score, place)//NearLandmark 인터페이스로 랜드마크 정보 저장
+                                    Log.d("Intent lm id", "landMark$totalLandmark")
                                     intent.putExtra("landMark$totalLandmark", landmark)//SuccessLandmark에 보낼 intent에 검색된 랜드마크 저장
                                 }
                             }
@@ -360,7 +392,9 @@ open class MainActivity : ComponentActivity() {
                             intent.putExtra("city",engCity.value)//SuccessLandmark에 보낼 intent에 현재 사용자 위치 도시 영어 이름 저장
                             intent.putExtra("totalLandmark",totalLandmark)//SuccessLandmark에 보낼 intent에 조건에 맞는 검색된 총 랜드마크 수 저장
                             intent.putExtra("languageSetting", languageSetting.value)//SuccessLandmark에 보낼 intent에 현재 언어설정 저장
+                            Log.d("VISION Start1 ", "start intent")
                             startActivity(intent)////SuccessLandmark 시작
+                            Log.d("VISION Start2 ", "start successLandMark")
                         }
                     }
 
@@ -407,8 +441,10 @@ open class MainActivity : ComponentActivity() {
                         }
                         try{
                             fusedLocationClient.lastLocation.addOnSuccessListener {//마지막으로 알려진 사용자 정보를 불러옴
-                                userLocation = it
-                                //getAddress()
+                                if(it != null) {
+                                    userLocation = it
+                                    getAddress()
+                                }
                             }
                         }catch (_: SecurityException){
                         }
@@ -524,7 +560,6 @@ open class MainActivity : ComponentActivity() {
                 format = "text"
             )
             txtState.value = response.data.translations[0].translatedText
-            Log.d("Trans Success", response.data.translations[0].translatedText)
             return@launch
         }
     }
@@ -611,7 +646,6 @@ fun UserLocaleTxt(cityState: MutableState<String>, countryState: MutableState<St
 }
 
 @Composable
-
 fun CameraBtn(disableBtn: MutableState<Boolean>, searchTxt: MutableState<String>,imgUri: MutableState<Uri>, isSearch: MutableState<Boolean>,contxt: Context,modifier: Modifier = Modifier){
     val btnColor = ButtonDefaults.buttonColors(Color(0,179,219,255))
     val btnElevation = ButtonDefaults.buttonElevation(defaultElevation = 7.dp)
@@ -626,15 +660,15 @@ fun CameraBtn(disableBtn: MutableState<Boolean>, searchTxt: MutableState<String>
          })
     Column(verticalArrangement = Arrangement.Top, horizontalAlignment = Alignment.CenterHorizontally){
         Row(modifier = modifier
-            .fillMaxWidth(0.5f)
-            .fillMaxHeight(0.39f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            .width(210.dp)
+            .height(210.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             ElevatedButton(enabled = !(disableBtn.value), onClick = {
                 camLauncher.launch(uri)
             }, modifier = modifier.fillMaxSize(),shape = RoundedCornerShape(50.dp), colors = btnColor, elevation = btnElevation) {
                 Icon(
                     imageVector = Icons.Default.PhotoCamera,
                     contentDescription = "camera_btn",
-                    modifier = modifier.fillMaxSize(),
+                    modifier = modifier.width(170.dp).height(170.dp),
                     tint = Color.Black
                 )
 
@@ -688,11 +722,17 @@ fun SelectTranslation(dataStore: StoreLanguageSetting, languageSetting: MutableS
                                         key = BuildConfig.CLOUD_TRANSLATION,
                                         q = engCity.value,
                                         source = "en",
-                                        target = targetLang,
+                                        target = "ko",//targetLang
                                         format = "text"
                                     )
-                                    cityState.value = response.data.translations[0].translatedText
-                                    Log.d("Trans Success", response.data.translations[0].translatedText)
+                                    //val gson = Gson()
+                                    //val resp = gson.toJsonTree(response.data.translations[0]).asJsonObject
+                                    //val res = gson.toJsonTree(response.data.translations).asJsonArray
+                                    //Log.d("Trans Success city resp2", resp.get("translatedText").asString)
+                                    //Log.d("Trans Success country res2", res[0].asJsonObject.get("translatedText").asString)
+                                    cityState.value = response.data.translations[0].translatedText//res[0].asJsonObject.get("translatedText").asString
+                                    //cityState.value = resp.get("translatedText").asString//.replace("^\"|\"$","")
+                                    Log.d("Trans Success", cityState.value)
                                     return@launch
                                 }
                             }
@@ -701,11 +741,15 @@ fun SelectTranslation(dataStore: StoreLanguageSetting, languageSetting: MutableS
                                     key = BuildConfig.CLOUD_TRANSLATION,
                                     q = engCountry.value,
                                     source = "en",
-                                    target = targetLang,
+                                    target = "ko",//targetLang,
                                     format = "text"
                                 )
-                                countryState.value = response.data.translations[0].translatedText
-                                Log.d("Trans Success", response.data.translations[0].translatedText)
+                                //val gson = Gson()
+                                //val resp = gson.toJsonTree(response.data.translations[0]).asJsonObject
+                                //val res = gson.toJsonTree(response).asJsonObject
+                                //Log.d("Trans Success country resp3", resp.get("translatedText").asString)
+                                countryState.value = response.data.translations[0].translatedText//res[0].asJsonObject.get("translatedText").asString
+                                Log.d("Trans Success", countryState.value)
                                 return@launch
                             }
                             searchTxt.value = "장소 검색"
@@ -748,7 +792,6 @@ fun Context.createTmpImageUri(
 @Composable
 private fun CircularProgressBar(showProgress : MutableState<Boolean>, modifier: Modifier = Modifier) {
     val loading by remember { showProgress }
-
     if (!loading) return
 
     Column (
@@ -757,7 +800,7 @@ private fun CircularProgressBar(showProgress : MutableState<Boolean>, modifier: 
             .fillMaxHeight(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally){
         Row (modifier = modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.96f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center
+            .fillMaxHeight(0.1718f), horizontalArrangement = Arrangement.Center
         ){
             CircularProgressIndicator(
                 modifier = modifier.fillMaxSize(0.16f),
