@@ -49,6 +49,7 @@
 <div align="center"><img src = "https://github.com/Jin1751/Travel_Eye/assets/85219721/2cbe379d-1976-4a96-9c88-66b544c524f1" width = "750" height = "400"/></div>
 
 ---
+
 ## 작동 화면
 
 - **장소 검색 성공**
@@ -62,4 +63,11 @@
 - **네트워크 연결 오류**
 
 <div align="center"><img src = "https://github.com/Jin1751/Travel_Eye/assets/85219721/c53fc8fb-506d-4ded-a409-b1a7a2543ae7" width = "750" height = "400"/></div>
+
 ---
+
+## 시연 영상
+
+- ***이미지를 클릭하면 유튜브로 넘어갑니다***
+  
+<div align="center"><a href="https://youtu.be/MbBF5dnqzw0?si=blV2ylMReZYh9gos"><img src = "https://github.com/Jin1751/Travel_Eye/assets/85219721/a3d2f240-67d3-4b18-8700-06fa6b915115" width = "600" height = "350"/></div>
