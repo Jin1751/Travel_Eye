@@ -46,8 +46,8 @@
 
 ## API 관계도
 
-<div align="center"><img src = "https://github.com/Jin1751/Travel_Eye/assets/85219721/2cbe379d-1976-4a96-9c88-66b544c524f1" width = "750" height = "400"/></div>
-
+<div align="center"><img src = "https://github.com/Jin1751/Travel_Eye/assets/85219721/a5bd3fe7-96dc-470a-8c4f-ac1f4c39377c" width = "300" height = "200"/></div>
+<div align="center"><img src = "https://github.com/Jin1751/Travel_Eye/assets/85219721/75c15a3b-761c-406c-a805-cba89fe8a4a4" width = "750" height = "300"/></div>
 ---
 
 ## 작동 화면
