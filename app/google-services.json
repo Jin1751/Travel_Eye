@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "392530218367",
-    "project_id": "travel-eye-8a1b5",
-    "storage_bucket": "travel-eye-8a1b5.appspot.com"
+    "project_number": "your_project_number",
+    "project_id": "your_project_id",
+    "storage_bucket": "your_storage"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:392530218367:android:2f18b68a7713145dafde4a",
+        "mobilesdk_app_id": "your_id",
         "android_client_info": {
           "package_name": "com.dongjin.traveleye"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBuvTehZIOM3p2W9k57NsviU-JcwYfMV_I"
+          "current_key": "your_key"
         }
       ],
       "services": {
@@ -25,5 +25,5 @@
       }
     }
   ],
-  "configuration_version": "1"
+  "configuration_version": "your_version"
 }
