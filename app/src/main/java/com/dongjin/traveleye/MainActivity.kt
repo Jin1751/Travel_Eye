@@ -190,7 +190,7 @@ open class MainActivity : ComponentActivity() {
         }//스플래쉬 화면이 끝날때 앱 로고를 줄어들게 하며 다음 화면으로 넘어가게 하는 애니메이션
 
         val backGroundScope = CoroutineScope(Dispatchers.IO)
-        backGroundScope.launch {
+        backGroundScope.launch {//배너광고들을 백그라운드에서 가져오기 위한 Coroutine Scope 실행
             // Initialize the Google Mobile Ads SDK on a background thread.
             MobileAds.initialize(this@MainActivity) {}
         }
@@ -779,14 +779,14 @@ fun MainActivity(dataStore: StoreLanguageSetting , cityState: MutableState<Strin
 }
 
 @Composable
-fun BannersAds() {
+fun BannersAds() {//배너 광고 함수
     val adRequest = AdRequest.Builder().build()
     AndroidView(
         modifier = Modifier.fillMaxWidth(),
         factory = { context ->
             AdView(context).apply {
                 setAdSize(AdSize.BANNER)
-                adUnitId = BuildConfig.AD_ID
+                adUnitId = BuildConfig.AD_ID//admob에서 받은 app id
                 loadAd(adRequest)
             }
         },
