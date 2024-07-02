@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "your_id",
         "android_client_info": {
-          "package_name": "com.dongjin.traveleye"
+          "package_name": "your_package_name"
         }
       },
       "oauth_client": [],
