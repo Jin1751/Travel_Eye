@@ -18,7 +18,7 @@ android {
         applicationId = "com.dongjin.traveleye"
         minSdk = 31
         targetSdk = 34
-        versionCode = 12
+        versionCode = 15
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -30,6 +30,7 @@ android {
         buildConfigField("String","MAPS_API_KEY",properties.getProperty("MAPS_API_KEY"))
         buildConfigField("String","MAP_ID",properties.getProperty("MAP_ID"))
         buildConfigField("String","CLOUD_TRANSLATION",properties.getProperty("CLOUD_TRANSLATION"))
+        buildConfigField("String","AD_ID",properties.getProperty("AD_ID"))
         buildFeatures{
             buildConfig = true
             viewBinding = true
@@ -37,6 +38,7 @@ android {
         manifestPlaceholders["MAPS_API_KEY"] = properties.getProperty("MAPS_API_KEY")
         manifestPlaceholders["MAP_ID"] = properties.getProperty("MAP_ID")
         manifestPlaceholders["CLOUD_TRANSLATION"] = properties.getProperty("CLOUD_TRANSLATION")
+        manifestPlaceholders["AD_ID"] = properties.getProperty("AD_ID")
     }
 
     buildTypes {
@@ -85,11 +87,10 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material:1.6.8")
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
-    implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-functions:21.0.0")
     implementation("com.google.code.gson:gson:2.10.1")
-    implementation("com.google.android.gms:play-services-maps:18.2.0")
+    implementation("com.google.android.gms:play-services-maps:19.0.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("com.google.maps.android:maps-compose:4.3.2")
     implementation("androidx.appcompat:appcompat:1.7.0")
@@ -100,9 +101,12 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation ("androidx.datastore:datastore-preferences:1.1.1")
     implementation("com.google.firebase:firebase-firestore:25.0.0")
+    implementation(platform("com.google.firebase:firebase-bom:33.1.1"))
+    implementation("com.google.firebase:firebase-storage")
+    implementation("com.google.android.gms:play-services-ads:23.1.0")
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.0")
     androidTestImplementation(platform("androidx.compose:compose-bom:2023.03.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")

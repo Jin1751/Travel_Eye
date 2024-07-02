@@ -82,10 +82,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.animation.doOnEnd
 import androidx.core.app.ActivityCompat
 import androidx.core.content.FileProvider
 import com.dongjin.traveleye.ui.theme.TravelEyeTheme
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.tasks.Task
@@ -96,22 +101,25 @@ import java.io.File
 import java.util.Locale
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.firestore
 import com.google.firebase.functions.FirebaseFunctions
 import com.google.firebase.functions.FirebaseFunctionsException
 import com.google.firebase.functions.ktx.functions
 import com.google.firebase.ktx.Firebase
+import com.google.firebase.storage.ktx.storage
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.ByteArrayOutputStream
-
 
 open class MainActivity : ComponentActivity() {
 
@@ -134,6 +142,12 @@ open class MainActivity : ComponentActivity() {
     private var disableBtn = mutableStateOf(false)//네트워크가 안됐을때 검색버튼을 비활성화하기 위한 mutableState 함수 (네트워크 정상시 활성화)
 
     private var searchTxt = mutableStateOf("장소 검색")//장소 검색 버튼임을 알리는 텍스트를 저장할 mutableState 함수 (영어로 변환 및 "검색중..."으로 바꾸기 위해 mutableState를 사용함)
+
+    private lateinit var geminiListener : ListenerRegistration//firestore에서 Gemini의 결과를 받아올 리스너 오브젝트
+
+
+    private var state = mutableStateOf("none")//Gemini 결과의 상태를 저장할 mutableState 함수 [PROCESSING, ERRORED, COMPLETED]
+    private var placeOutput = mutableStateOf("")//Gemini의 설명을 저장할 mutableState 함수
 
     private var imgUri = mutableStateOf(Uri.EMPTY)//촬영한 이미지를 저장하기 위한 Uri mutableState 함수 (Cloud Vision에 요청시 Bitmap으로 변환)
     private val initBitmap = Bitmap.createBitmap(1000, 1000, Bitmap.Config.ARGB_8888)//bitmapImg를 생성하기 위해 잠시 만든 이미지 (실제 사용 x)
@@ -175,7 +189,11 @@ open class MainActivity : ComponentActivity() {
             }
         }//스플래쉬 화면이 끝날때 앱 로고를 줄어들게 하며 다음 화면으로 넘어가게 하는 애니메이션
 
-
+        val backGroundScope = CoroutineScope(Dispatchers.IO)
+        backGroundScope.launch {
+            // Initialize the Google Mobile Ads SDK on a background thread.
+            MobileAds.initialize(this@MainActivity) {}
+        }
 
         val retrofit = Retrofit.Builder().baseUrl("https://translation.googleapis.com/language/translate/").addConverterFactory(GsonConverterFactory.create()).build()
         translateApi = retrofit.create(TranslateApi::class.java)
@@ -316,6 +334,7 @@ open class MainActivity : ComponentActivity() {
             functions = Firebase.functions
 
             val byteArrayOutputStream = ByteArrayOutputStream()
+
             bitmapImg.value.compress(Bitmap.CompressFormat.JPEG, 100, byteArrayOutputStream)//이미지를 압축
             val imageBytes: ByteArray = byteArrayOutputStream.toByteArray()
             val base64encoded = Base64.encodeToString(imageBytes, Base64.NO_WRAP)//이미지를 64비트 문자열로 변환
@@ -331,12 +350,17 @@ open class MainActivity : ComponentActivity() {
             request.add("features",features)//세부사항 오브젝트를 request 오브젝트에 입력
             val intent = Intent(this, SuccessLandmark::class.java)//SuccessLandmark에 보낼 intent
             intent.putExtra("userLocation", userLocation)//SuccessLandmark에 보낼 intent 사용자 위치를 저장
+            intent.putExtra("country",engCountry.value)//SuccessLandmark에 보낼 intent에 현재 사용자 위치 국가 영어 이름 저장
+            intent.putExtra("city",engCity.value)//SuccessLandmark에 보낼 intent에 현재 사용자 위치 도시 영어 이름 저장
+            intent.putExtra("languageSetting", languageSetting.value)//SuccessLandmark에 보낼 intent에 현재 언어설정 저장
+
             Log.d("Intent USERLOC", userLocation.latitude.toString() + ", " + userLocation.longitude)
 
             annotateImage(request.toString()).addOnCompleteListener{task ->
-                if (task.isSuccessful){//Firebase 통신으로 Cloud Vision API와 통신완료 시
+                if (task.isSuccessful){
+                    //Firebase 통신으로 Cloud Vision API와 통신완료 시
+
                     val e = task.exception
-                    showProgress.value = false
                     searchTxt.value = when(languageSetting.value){//장소 검색 텍스트를 원래대로 복원
                         "korean" -> "장소 검색"
                         "english" -> "Search Place"
@@ -348,23 +372,24 @@ open class MainActivity : ComponentActivity() {
                         errorOccurred.value = true//에러 다이얼로그 실행
                         errorState.value = "VISION_ERR"
                     }
-                    if (task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray.size() == 0){//통신은 됐으나 장소를 찾지 못했을 경우
-                        errorOccurred.value = true//에러 다이얼로그 실행
-                        errorState.value = "NOT_FOUND"
-                    }
-                    else{//검색 결과가 있을 경우
+                    //if (task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray.size() == 0){//통신은 됐으나 장소를 찾지 못했을 경우
+                    //    errorOccurred.value = true//에러 다이얼로그 실행
+                    //    errorState.value = "NOT_FOUND"
+                    //}
+                    //검색 결과가 있을 경우
+                    else{
                         var totalLandmark = 0//SuccessLandmark에 보낼 조건에 맞는 검색된 랜드마크 총 개수
                         for (label in task.result!!.asJsonArray[0].asJsonObject["landmarkAnnotations"].asJsonArray) {// 검색 결과를 순서대로 출력
-                            val labelObj = label.asJsonObject
-                            val landmarkName = labelObj["description"].asString//명소이름
-                            val score = labelObj["score"].asDouble//해당 명소일 확률(?)
+                        val labelObj = label.asJsonObject
+                        val landmarkName = labelObj["description"].asString//명소이름
+                        val score = labelObj["score"].asDouble//해당 명소일 확률(?)
 
 
-                            Log.d("VISION DESC", "Description: $landmarkName")
-                            Log.d("VISION Score", "score: $score")
+                        Log.d("VISION DESC", "Description: $landmarkName")
+                        Log.d("VISION Score", "score: $score")
 
-                            // Multiple locations are possible, e.g., the location of the depicted
-                            // landmark and the location the picture was taken.
+                        // Multiple locations are possible, e.g., the location of the depicted
+                        // landmark and the location the picture was taken.
 
                             for (loc in labelObj["locations"].asJsonArray) {//검색된 장소들의 정보 중 위치 정보만 하나씩 가져옴
                                 val latitude = loc.asJsonObject["latLng"].asJsonObject["latitude"]//검색된 장소의 위도
@@ -380,24 +405,12 @@ open class MainActivity : ComponentActivity() {
                                     intent.putExtra("landMark$totalLandmark", landmark)//SuccessLandmark에 보낼 intent에 검색된 랜드마크 저장
                                 }
                             }
-                            Log.d("VISION SUCCESS", "total: $totalLandmark")
+                        Log.d("VISION SUCCESS", "total: $totalLandmark")
 
                         }
-                        isSearchImg.value = false
-                        if (totalLandmark == 0){//검색된 장소 중 사용자와 5km 이내의 장소가 하나도 없다면 검색 실패 오류 실행
-                            errorOccurred.value = true
-                            errorState.value = "NOT_FOUND"
-                        }else{
-                            intent.putExtra("country",engCountry.value)//SuccessLandmark에 보낼 intent에 현재 사용자 위치 국가 영어 이름 저장
-                            intent.putExtra("city",engCity.value)//SuccessLandmark에 보낼 intent에 현재 사용자 위치 도시 영어 이름 저장
-                            intent.putExtra("totalLandmark",totalLandmark)//SuccessLandmark에 보낼 intent에 조건에 맞는 검색된 총 랜드마크 수 저장
-                            intent.putExtra("languageSetting", languageSetting.value)//SuccessLandmark에 보낼 intent에 현재 언어설정 저장
-                            Log.d("VISION Start1 ", "start intent")
-                            startActivity(intent)////SuccessLandmark 시작
-                            Log.d("VISION Start2 ", "start successLandMark")
-                        }
+                        uploadImg(city.value,country.value,imageBytes,intent, totalLandmark)//Gemini 사진 검색 시작
+
                     }
-
                 }
                 else{//Cloud Vision API와 통신 실패시 에러 메세지 출력
                     errorOccurred.value = true
@@ -472,6 +485,142 @@ open class MainActivity : ComponentActivity() {
 
 
     }//사진, 위치 등 권한 체크를 하는 함수
+
+    private fun uploadImg(userCountry: String, userCity: String, image : ByteArray, mapIntent: Intent, totalLandmark : Int){//fire storage에 사진을 업로드 하는 함수 (업로드를 해야만 Gemini가 사진 인식이 가능)
+        val fireStorage = Firebase.storage
+        val storageRef = fireStorage.reference
+        val fileRef = storageRef.child("travel-eye-places")
+        val imgId = "$userCountry$userCity${System.currentTimeMillis()}.jpeg"
+        val imgRef = fileRef.child(imgId)
+        val uploadTask = imgRef.putBytes(image)
+        val fireUri = Uri.Builder().scheme("gs").authority(fireStorage.reference.bucket).build()
+        uploadTask.addOnCompleteListener{
+            Log.d("FIREBASE STROGE SUCCESS UPLOADED", "SUCCESS")
+            useGemini("$fireUri${imgRef.path}", imgRef.path, mapIntent, totalLandmark)
+        }
+
+    }
+    private fun useGemini(path: String, imageID : String, mapIntent: Intent, totalLandmark : Int){
+        var total = totalLandmark
+        val firestore = com.google.firebase.Firebase.firestore//firebase에서 gemini extension이 참조하는 firestore
+        val imgValue = hashMapOf(//firebase의 gemini extension의 prompt에 들어갈 값들을 collection에 삽입
+            "image" to path
+        )
+        firestore.collection("placeSearch").document("geminiDoc").set(imgValue).addOnSuccessListener {
+            Log.d("FIREBASE COLLECTION WRITE", "SUCCESSED")//collection 수정 완료
+        }
+        val response = firestore.collection("placeSearch").document("geminiDoc")//gemini의 설명과 상태를 가진 firestore 문서
+        geminiListener = response.addSnapshotListener{//firestore 문서의 변화가 생기면 반응할 리스너 설정
+                snapshot, e ->
+            if (e != null) {//gemini exception발생으로 MainActivity로 전환
+                Log.d("FIREBASE GEMINI VISION", "Listen failed.", e)
+                showProgress.value = false
+                return@addSnapshotListener
+            }
+            if (snapshot != null && snapshot.exists()) {//정상적으로 gemini 설명을 받았을 때
+                val geminiData = snapshot.get("output").toString()//문서에서 description 부분을 저장
+
+                val status = snapshot["status"].toString().split("=")//문서의 status 부분을 '='로 나눠서 리스트로 저장 (status 중 state 값만 사용하기 위함, 특정 값만 받아오는 함수가 없음)
+                state.value = status[status.size - 1]//status 중 가장 마지막에 있는 state를 저장 (PROCESSING, COMPLETED)
+                var errorCheck = false
+                status.forEach {
+                    if (it == "ERRORED, error") {// error 체크, error는 에러 설명이 리스트 맨 뒤에 나와서 다른 상태처럼 체크가 불가능
+                        errorCheck = true
+                    }
+                }
+                if ((state.value == "COMPLETED}") or (errorCheck)){//gemini 응답 상태가 completed나 errored일때만 작동
+                    placeOutput.value = geminiData//gemini에게 받은 정보 저장
+                    if (placeOutput.value != "null"){
+                        Log.d("GEMINI PRO VISION", placeOutput.value)
+                        val placeName = placeOutput.value//gemini에게 검색된 장소 이름만 가져옴 (위치 정보가 매우 부정확하기 때문)
+                        if (placeName.isNotEmpty()){
+                            Log.d("GEMINI PRO VISION place info", placeName)
+                            var geminiLatitude = -300.0//위도,경도로 나올 수 없는 값을 지정해 Gemini 결과가 나올때까지 대기하도록 함
+                            var geminiLongitude = -300.0//위도,경도로 나올 수 없는 값을 지정해 Gemini 결과가 나올때까지 대기하도록 함
+                            Log.d("GEMINI PRO VISION before loc ", "" + geminiLatitude + ", " + geminiLongitude)
+                            val geocoder = Geocoder(this, Locale.ENGLISH)//장소 이름으로 위도, 경도를 얻기 위한 Geocoder 오브젝트
+                            CoroutineScope(Dispatchers.IO).launch{
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    geocoder.getFromLocationName(placeName, 1) {//이름만으로 좌표 검색 API 33이상
+                                        if (it.size > 0){// 못찾았을 경우 경도를 -350으로 해 추후에 나올 무한 반복문을 빠져나감
+                                            geminiLatitude = it[0].latitude
+                                            geminiLongitude = it[0].longitude
+                                        }else{
+                                            geminiLongitude = -350.0
+                                        }
+                                        Log.d("GEMINI PRO VISION after loc ", "" + geminiLatitude + ", " + geminiLongitude)
+                                    }
+                                } else{
+                                    val loc = geocoder.getFromLocationName(placeName,1)//이름만으로 좌표 검색 API 33이하
+                                    if (loc != null) {
+                                        if (loc.size > 0){
+                                            geminiLatitude = loc[0].latitude
+                                            geminiLongitude = loc[0].longitude
+                                            Log.d("GEMINI PRO VISION after loc ", "" + geminiLatitude + ", " + geminiLongitude)
+                                        }
+                                        else{// 못찾았을 경우 경도를 -350으로 해 추후에 나올 무한 반복문을 빠져나감
+                                            geminiLongitude = -350.0
+                                        }
+                                    }
+                                    else{// 못찾았을 경우 경도를 -350으로 해 추후에 나올 무한 반복문을 빠져나감
+                                        geminiLongitude = -350.0
+                                    }
+                                }
+                                return@launch
+                            }
+                            while(geminiLongitude == -300.0){//무한 반복을 돌려 gemini가 찾은 장소의 좌표를 찾을 때까지 잠깐 대기함, 못찾았을 경우 경도가 -350으로 바뀌며 무한 반복을 빠져나감
+
+                            }
+                            if(geminiLongitude > -181){//좌표를 찾았을 경우 사용자와의 거리 계산 후 반경 5km에 있으면 지도 액티비티 intent에 포함
+                                val place = Location(LocationManager.GPS_PROVIDER)
+                                place.latitude = geminiLatitude
+                                place.longitude = geminiLongitude
+                                Log.d("GEMINI PRO VISION place loc ", "" + place.latitude + ", " + place.longitude)
+                                if (userLocation.distanceTo(place) < 5000){//사용자와 검색된 장소의 거리를 계산해 5km이내의 장소만 저장
+                                    total = totalLandmark + 1
+                                    Log.d("GEMINI VISION $total", "Distance: " + userLocation.distanceTo(place) + ", LANDMARK NAME: " + placeName)
+                                    val landmark = NearLandmark(placeName, "none", 0.8, place)//NearLandmark 인터페이스로 랜드마크 정보 저장
+                                    Log.d("Intent lm id", "landMark$total")
+                                    mapIntent.putExtra("landMark$total", landmark)//SuccessLandmark에 보낼 intent에 검색된 랜드마크 저장
+                                }
+                            }
+                        }
+
+                    }else{
+                        Log.d("GEMINI PRO VISION null", placeOutput.value)
+                    }
+                    showProgress.value = false//원형 프로그래스바 중지
+                    if (total == 0){//검색된 장소 중 사용자와 5km 이내의 장소가 하나도 없다면 검색 실패 오류 실행
+                        errorOccurred.value = true
+                        errorState.value = "NOT_FOUND"
+                    }else{//모든 장소 검색(Cloud vision api, Gemini)이 정상적으로 끝나고 찾은 장소가 있다면 실행
+                        geminiListener.remove()//리스너를 없애주지 않으면 다른 액티비티로 넘어가도 계속 작동하며 메모리 누수 발생
+                        Log.d("VISION Start1 ", "start intent")
+                        mapIntent.putExtra("totalLandmark",total)//SuccessLandmark에 보낼 intent에 조건에 맞는 검색된 총 랜드마크 수 저장
+                        startActivity(mapIntent)////SuccessLandmark 시작
+                        Log.d("VISION Start2 ", "start successLandMark")
+                    }
+
+
+                    return@addSnapshotListener
+                }
+                else{//gemini가 작업 중일땐 원형 프로그래스바 표현
+                    showProgress.value = true
+                }
+            } else {//gemini 설명이 없을 때 에러로 인한 MainActivity 복귀
+                showProgress.value = false
+                if (total == 0){//검색된 장소 중 사용자와 5km 이내의 장소가 하나도 없다면 검색 실패 오류 실행
+                    errorOccurred.value = true
+                    errorState.value = "NOT_FOUND"
+                }else{//gemini는 에러로 끝났어도 Cloud vision api에서 찾은게 있으면 지도 액티비티로 이동
+                    Log.d("VISION Start3 ", "start intent")
+                    mapIntent.putExtra("totalLandmark",total)//SuccessLandmark에 보낼 intent에 조건에 맞는 검색된 총 랜드마크 수 저장
+                    startActivity(mapIntent)////SuccessLandmark 시작
+                    Log.d("VISION Start4 ", "start successLandMark")
+                }
+            }
+        }
+    }
 
     private fun startLocationUpdate(){
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
@@ -623,9 +772,28 @@ fun MainActivity(dataStore: StoreLanguageSetting , cityState: MutableState<Strin
                 }
             }
         }
-
+        Spacer(modifier = modifier.fillMaxHeight(0.5f))
+        BannersAds()
     }
 
+}
+
+@Composable
+fun BannersAds() {
+    val adRequest = AdRequest.Builder().build()
+    AndroidView(
+        modifier = Modifier.fillMaxWidth(),
+        factory = { context ->
+            AdView(context).apply {
+                setAdSize(AdSize.BANNER)
+                adUnitId = BuildConfig.AD_ID
+                loadAd(adRequest)
+            }
+        },
+        update = { adView ->
+            adView.loadAd(adRequest)
+        }
+    )
 }
 
 @Composable
@@ -668,7 +836,9 @@ fun CameraBtn(disableBtn: MutableState<Boolean>, searchTxt: MutableState<String>
                 Icon(
                     imageVector = Icons.Default.PhotoCamera,
                     contentDescription = "camera_btn",
-                    modifier = modifier.width(170.dp).height(170.dp),
+                    modifier = modifier
+                        .width(170.dp)
+                        .height(170.dp),
                     tint = Color.Black
                 )
 
@@ -783,7 +953,7 @@ fun Context.createTmpImageUri(
     provider: String = "${this.applicationContext.packageName}.provider",
     fileName: String = "picture_${System.currentTimeMillis()}",
     fileExtension: String = ".png"
-): Uri {
+):  Uri{
     val tmpFile = File.createTempFile(fileName, fileExtension, cacheDir).apply { createNewFile() }
     Log.d("Photo", FileProvider.getUriForFile(applicationContext, provider, tmpFile).toString())
     return FileProvider.getUriForFile(applicationContext, provider, tmpFile)
