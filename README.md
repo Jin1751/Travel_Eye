@@ -20,7 +20,7 @@
 
 ## 사용 SDK
 
-- 안드로이드 스튜디오 <img src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=ffffff"/>
+- 안드로이드 스튜디오 <img src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=ffffff"/> <img src="https://img.shields.io/badge/Compose-2EC781?style=flat-square&logo=jetpackcompose&logoColor=ffffff"/>
 <div align="center"> <img src = "https://user-images.githubusercontent.com/85219721/203321697-4992308b-05ed-4ed2-bb0d-c400ae73eb50.png" width = "250" height = "150"/></div>
 
 - Firebase
