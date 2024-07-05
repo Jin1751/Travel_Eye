@@ -1,6 +1,6 @@
-# Travel Eye
+# 프로젝트 명: Travel Eye
 
-- 앱 이름: **Travel Eye(트래블 아이)**
+- 앱 이름: **Travel Lens(트래블 렌즈)**
 
 - 앱 설명: AI를 이용해 사진 속 장소에 대한 간단한 정보를 제공하는 앱
 
