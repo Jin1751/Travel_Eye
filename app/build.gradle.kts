@@ -18,7 +18,7 @@ android {
         applicationId = "com.dongjin.traveleye"
         minSdk = 31
         targetSdk = 34
-        versionCode = 16
+        versionCode = 18
         versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
