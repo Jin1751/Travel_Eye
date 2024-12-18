@@ -1,4 +1,4 @@
-# 프로젝트 명: Travel Eye
+# 프로젝트 명: Travel Lens
 
 - 앱 이름: **Travel Lens(트래블 렌즈)**
 
